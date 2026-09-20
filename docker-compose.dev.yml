@@ -1,0 +1,47 @@
+# Local dev demonstration of the "one deployment per tenant" model (see
+# pergolando-backend's README): one backend + one frontend pair, pointed at
+# a single bundle Studio has already exported. A second tenant would be a
+# second backend+frontend pair with a different BUNDLE_PATH/DATABASE_URL/
+# port — not a flag on this one.
+#
+# Prerequisites:
+#   - pergolando-backend and pergolando-frontend cloned as siblings of this
+#     directory (D:\Lavori\App\Pergolando\pergolando-backend, ...-frontend).
+#   - A bundle already exported by Studio, e.g.
+#     apps/studio/storage/bundles/brera-demo/0.1.0/ (see apps/studio's README).
+#
+# UNTESTED: Docker was not available in the environment this was written in.
+# Run `docker compose -f docker-compose.dev.yml up --build` and verify
+# before relying on it.
+
+services:
+  backend:
+    build:
+      context: ./pergolando-backend
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: "file:/app/data/db.sqlite"
+      BUNDLE_PATH: "/app/bundle"
+      PORT: "3001"
+      CORS_ORIGIN: "http://localhost:3000"
+      # Local HTTP only — production behind Cloudflare Tunnel terminates TLS
+      # and should run with this unset (defaults to secure cookies).
+      SESSION_COOKIE_SECURE: "false"
+    volumes:
+      - ./apps/studio/storage/bundles/brera-demo/0.1.0:/app/bundle:ro
+      - backend_data:/app/data
+    command: sh -c "pnpm exec prisma migrate deploy && node dist/main.js"
+
+  frontend:
+    build:
+      context: ./pergolando-frontend
+      args:
+        NEXT_PUBLIC_API_URL: "http://localhost:3001"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  backend_data:

@@ -6,6 +6,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@pergolando/studio", "run", "dev"],
       "port": 3000
+    },
+    {
+      "name": "venditore-frontend",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "pergolando-frontend", "run", "dev"],
+      "port": 3000
     }
   ]
 }

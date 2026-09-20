@@ -45,3 +45,15 @@ pnpm lint
 ```
 
 Studio itself: `pnpm --filter @pergolando/studio dev`.
+
+## Running App Venditore locally (one tenant)
+
+`docker-compose.dev.yml` runs one backend+frontend pair against a bundle Studio has already exported —
+see the file itself for prerequisites. It demonstrates the "one deployment per tenant" model: a second
+tenant is a second backend+frontend pair with a different bundle/database/port, not a flag on this one.
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
+(Untested in this environment — Docker wasn't available. Verify before relying on it.)
