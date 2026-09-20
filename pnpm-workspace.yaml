@@ -1,5 +1,5 @@
 packages:
-  - "packages/*"
   - "apps/*"
 allowBuilds:
   esbuild: true
+  "@pergolando/shared@https://codeload.github.com/daviderdsign/pergolando-shared/tar.gz/e1b89539277758a613fd5efc3c8da5c3dfc31b35": true

@@ -1,5 +1,5 @@
-import { PergolaEngine } from "@pergolando/pricing-engine";
-import type { CatalogDatabase, PriceMatrices } from "@pergolando/bundle-schema";
+import { PergolaEngine } from "@pergolando/shared/pricing-engine";
+import type { CatalogDatabase, PriceMatrices } from "@pergolando/shared/schema";
 
 /**
  * STU-5c: a smoke test, not exhaustive regression — for every
