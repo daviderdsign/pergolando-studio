@@ -11,7 +11,9 @@
 #   pergolando-backend/      (git clone of the backend repo)
 #   pergolando-frontend/     (git clone of the frontend repo)
 #
-# UNTESTED end-to-end on real hardware — verify the first run carefully.
+# Verified end-to-end on the real NAS deploy (2026-09-20): register -> login
+# -> wizard loading the real bundle catalog, through the public Cloudflare
+# Tunnel domain.
 
 services:
   backend:
@@ -38,7 +40,15 @@ services:
         # browser calls this directly; CORS_ORIGIN on the backend and
         # credentials:"include" on the frontend already handle it, same as
         # in local dev (there it's different ports instead of subdomains).
-        NEXT_PUBLIC_API_URL: "https://api.pergolando.rdsign-app.it"
+        #
+        # Single-level subdomain (pergolando-api, not api.pergolando):
+        # Cloudflare's Universal SSL certificate only covers one subdomain
+        # level (*.rdsign-app.it) — a two-level hostname like
+        # api.pergolando.rdsign-app.it has no valid certificate and fails
+        # TLS (ERR_SSL_VERSION_OR_CIPHER_MISMATCH) unless Advanced
+        # Certificate Manager is purchased. Confirmed on the actual NAS
+        # deploy — this cost real debugging time, don't reintroduce it.
+        NEXT_PUBLIC_API_URL: "https://pergolando-api.rdsign-app.it"
     restart: unless-stopped
 
   cloudflared:
