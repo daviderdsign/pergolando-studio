@@ -13,3 +13,7 @@ __pycache__/
 pergolando-shared/
 pergolando-backend/
 pergolando-frontend/
+deploy/*/backend.env
+deploy/*/bundle/
+deploy/*/pergolando-backend/
+deploy/*/pergolando-frontend/

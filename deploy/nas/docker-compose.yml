@@ -1,0 +1,51 @@
+# Production deployment for ONE tenant of App Venditore, on the self-hosted
+# NAS, exposed via Cloudflare Tunnel at pergolando.rdsign-app.it. A second
+# tenant is a second copy of this whole stack (different project name,
+# different bundle, different subdomain) — not a flag on this one.
+#
+# Expected layout in this folder (see README.md for how to get each piece):
+#   docker-compose.yml       (this file)
+#   backend.env              (filled in from backend.env.example)
+#   bundle/                  (a bundle folder exported by Studio: manifest.json,
+#                              catalog/, branding/)
+#   pergolando-backend/      (git clone of the backend repo)
+#   pergolando-frontend/     (git clone of the frontend repo)
+#
+# UNTESTED end-to-end on real hardware — verify the first run carefully.
+
+services:
+  backend:
+    build:
+      context: ./pergolando-backend
+    env_file: ./backend.env
+    volumes:
+      - ./bundle:/app/bundle:ro
+      - backend_data:/app/data
+    command: sh -c "pnpm exec prisma migrate deploy && node dist/main.js"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./pergolando-frontend
+      args:
+        # Same origin as the tunnel's public hostname — the browser calls
+        # /api/v1/... on this same domain, which the tunnel's path rule
+        # routes to the backend. No CORS, no cross-origin cookie issues.
+        NEXT_PUBLIC_API_URL: "https://pergolando.rdsign-app.it"
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel run
+    environment:
+      # From the Cloudflare Zero Trust dashboard (Networks > Tunnels > your
+      # tunnel > Configure > Docker). Put it in a .env file next to this
+      # compose file (TUNNEL_TOKEN=...), never commit it.
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  backend_data:

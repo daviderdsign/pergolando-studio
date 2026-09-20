@@ -57,3 +57,8 @@ docker compose -f docker-compose.dev.yml up --build
 ```
 
 (Untested in this environment — Docker wasn't available. Verify before relying on it.)
+
+## Deploying a tenant on the NAS
+
+`deploy/nas/` has the production Docker Compose setup + Cloudflare Tunnel wiring for putting one
+tenant online on the self-hosted NAS — see `deploy/nas/README.md` for the full step-by-step.
