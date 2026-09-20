@@ -1,4 +1,4 @@
-import { catalogDatabaseSchema, priceMatricesSchema } from "@pergolando/bundle-schema";
+import { catalogDatabaseSchema, priceMatricesSchema } from "@pergolando/shared/schema";
 import { checkPriceMatrices, type CoherenceIssue } from "./matrix-coherence";
 import { runSmokeTests, type SmokeTestResult } from "./regression-harness";
 import type { Draft } from "./storage";

@@ -2,7 +2,7 @@ import { writeFile, mkdir, readFile, copyFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import AdmZip from "adm-zip";
-import { CURRENT_SCHEMA_VERSION } from "@pergolando/bundle-schema";
+import { CURRENT_SCHEMA_VERSION } from "@pergolando/shared/schema";
 import { bundleExportDir, listBundleVersions, draftUploadPath, type Draft } from "./storage";
 
 /**
