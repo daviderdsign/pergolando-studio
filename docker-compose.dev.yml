@@ -31,7 +31,10 @@ services:
     volumes:
       - ./apps/studio/storage/bundles/brera-demo/0.1.0:/app/bundle:ro
       - backend_data:/app/data
-    command: sh -c "pnpm exec prisma migrate deploy && node dist/main.js"
+    # See deploy/nas/docker-compose.yml for why this calls the prisma
+    # binary directly instead of `pnpm exec prisma` (the latter crash-loops
+    # the container — confirmed on the NAS deploy).
+    command: sh -c "node_modules/.bin/prisma migrate deploy && node dist/main.js"
 
   frontend:
     build:

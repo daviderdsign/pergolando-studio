@@ -21,7 +21,13 @@ services:
     volumes:
       - ./bundle:/app/bundle:ro
       - backend_data:/app/data
-    command: sh -c "pnpm exec prisma migrate deploy && node dist/main.js"
+    # Calls the prisma binary directly, not via `pnpm exec` — the latter
+    # re-runs pnpm's dependency status check on every container start,
+    # which re-triggers the git-dependency build-script approval gate
+    # (pnpm-lock.yaml/pnpm-workspace.yaml aren't in the runtime image) and
+    # crash-loops the container. No need for pnpm at all here: node_modules
+    # is already fully installed from the build stage.
+    command: sh -c "node_modules/.bin/prisma migrate deploy && node dist/main.js"
     restart: unless-stopped
 
   frontend:
