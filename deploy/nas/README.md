@@ -70,31 +70,42 @@ modificarlo a meno che tu non usi un altro dominio.
 
 ## 4. Cloudflare Tunnel
 
-Nel dashboard **Cloudflare Zero Trust** (non il dashboard DNS normale):
+L'interfaccia di Cloudflare è cambiata più volte negli ultimi mesi — se questi
+nomi non corrispondono esattamente a quello che vedi, cerca "Tunnels" nella
+barra di ricerca del dashboard, non fidarti ciecamente di questi screenshot
+testuali.
 
-1. **Networks → Tunnels → Create a tunnel** → tipo *Cloudflared* → nome
+1. Dashboard Cloudflare → **Networking → Tunnels → Create Tunnel** → nome
    `pergolando`.
-2. Nella schermata "Choose a connector", scegli **Docker** — Cloudflare ti
-   mostra un comando `docker run` con un token lungo dentro
-   `--token eyJ...`. Copia solo quel token (la parte dopo `--token`).
+2. Nella schermata di setup dell'ambiente, scegli **Docker** come
+   connettore — Cloudflare mostra un comando `docker run` con un token
+   lungo dopo `--token`. Copia solo quel token.
 3. Incolla il token in `.env`:
    ```
    TUNNEL_TOKEN=eyJ...
    ```
-4. Nella stessa schermata di configurazione del tunnel, vai su **Public
-   Hostname** e aggiungi **due regole**, in quest'ordine (l'ordine conta:
-   la prima regola che combacia vince):
+4. Apri il tuo tunnel (Networking → Tunnels → seleziona `pergolando`) e
+   vai sul tab **Routes**. Seleziona **Add route → Published application**
+   e aggiungi **due route separate** (due sottodomini sullo stesso tunnel,
+   non due regole sullo stesso hostname — più semplice e più affidabile
+   del routing per-percorso, che nella UI attuale non è chiaramente
+   esposto):
 
-   | Hostname | Path | Service |
-   | --- | --- | --- |
-   | `pergolando.rdsign-app.it` | `/api/*` | `http://backend:3001` |
-   | `pergolando.rdsign-app.it` | (vuoto) | `http://frontend:3000` |
+   | Hostname | Service |
+   | --- | --- |
+   | `pergolando.rdsign-app.it` | `http://frontend:3000` |
+   | `api.pergolando.rdsign-app.it` | `http://backend:3001` |
 
    `backend`/`frontend` sono i nomi dei servizi Docker Compose — funzionano
    come hostname perché `cloudflared` è nella stessa rete Docker.
-5. Questo passo crea automaticamente anche il record DNS per
-   `pergolando.rdsign-app.it` sotto `rdsign-app.it` — non serve aggiungerlo
-   a mano.
+5. Ogni route creata così genera automaticamente anche il record DNS
+   corrispondente sotto `rdsign-app.it` — non serve aggiungerlo a mano.
+
+Con due sottodomini invece di un percorso condiviso, frontend e backend sono
+tecnicamente due origin diversi per il browser: è lo stesso meccanismo CORS
+già usato e verificato in sviluppo locale (lì porte diverse, qui sottodomini
+diversi) — `CORS_ORIGIN` in `backend.env` e `NEXT_PUBLIC_API_URL` nel build
+del frontend sono già impostati di conseguenza in questi file.
 
 ## 5. Avvio
 

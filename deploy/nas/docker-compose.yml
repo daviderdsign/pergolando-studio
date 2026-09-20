@@ -28,19 +28,20 @@ services:
     build:
       context: ./pergolando-frontend
       args:
-        # Same origin as the tunnel's public hostname — the browser calls
-        # /api/v1/... on this same domain, which the tunnel's path rule
-        # routes to the backend. No CORS, no cross-origin cookie issues.
-        NEXT_PUBLIC_API_URL: "https://pergolando.rdsign-app.it"
+        # Separate subdomain, same tunnel (see README.md step 4) — the
+        # browser calls this directly; CORS_ORIGIN on the backend and
+        # credentials:"include" on the frontend already handle it, same as
+        # in local dev (there it's different ports instead of subdomains).
+        NEXT_PUBLIC_API_URL: "https://api.pergolando.rdsign-app.it"
     restart: unless-stopped
 
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel run
     environment:
-      # From the Cloudflare Zero Trust dashboard (Networks > Tunnels > your
-      # tunnel > Configure > Docker). Put it in a .env file next to this
-      # compose file (TUNNEL_TOKEN=...), never commit it.
+      # From the Cloudflare dashboard: Networking > Tunnels > your tunnel >
+      # Configure > Docker. Put it in a .env file next to this compose file
+      # (TUNNEL_TOKEN=...), never commit it.
       TUNNEL_TOKEN: ${TUNNEL_TOKEN}
     restart: unless-stopped
     depends_on:
