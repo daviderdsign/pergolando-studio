@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.next/
+coverage/
+storage/uploads/
+storage/bundles/
+*.log
+.env
+.env.local
+.DS_Store
+*.tsbuildinfo
+__pycache__/

@@ -1,0 +1,4 @@
+{
+  "files": [],
+  "references": [{ "path": "packages/bundle-schema" }, { "path": "packages/pricing-engine" }]
+}
