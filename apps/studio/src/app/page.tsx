@@ -2,6 +2,11 @@ import Link from "next/link";
 import { listDrafts } from "@/lib/storage";
 import { NewDraftForm } from "@/components/NewDraftForm";
 
+// The draft list changes constantly (new drafts, edits) — without this,
+// `next build` prerenders it once as static HTML and every deploy serves a
+// frozen snapshot from whatever storage/uploads/ looked like at build time.
+export const dynamic = "force-dynamic";
+
 export default async function HomePage() {
   const drafts = await listDrafts();
 
