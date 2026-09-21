@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+**/.next
+**/dist
+**/coverage
+apps/studio/storage/uploads
+apps/studio/storage/bundles
+.git
+.claude
+*.log
+.env
+.env.local

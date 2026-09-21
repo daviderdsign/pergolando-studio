@@ -3,6 +3,13 @@
 import { useState } from "react";
 import type { Draft } from "@/lib/storage";
 import type { ValidationReport } from "@/lib/validate-bundle";
+import type { AssetManifestEntry } from "@pergolando/shared/schema";
+
+const TIPO_LABELS: Record<AssetManifestEntry["tipo"], string> = {
+  foto: "Foto",
+  rendering: "Rendering",
+  altro: "Altro",
+};
 
 interface Props {
   initialDraft: Draft;
@@ -17,6 +24,13 @@ export function DraftEditor({ initialDraft }: Props) {
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadingAsset, setUploadingAsset] = useState(false);
+  const [assetTipo, setAssetTipo] = useState<AssetManifestEntry["tipo"]>("foto");
+  const [assetProdotto, setAssetProdotto] = useState("");
+  const [assetSottoModello, setAssetSottoModello] = useState("");
+  const [assetVariante, setAssetVariante] = useState("");
+  const [assetColore, setAssetColore] = useState("");
   const [report, setReport] = useState<ValidationReport | null>(null);
   const [validating, setValidating] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -75,6 +89,55 @@ export function DraftEditor({ initialDraft }: Props) {
     const form = new FormData();
     form.append("file", file);
     const res = await fetch(`/api/drafts/${draft.id}/letterhead`, { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error);
+      return;
+    }
+    setDraft(data.draft);
+  }
+
+  async function uploadLogo(file: File) {
+    setUploadingLogo(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`/api/drafts/${draft.id}/logo`, { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setDraft(data.draft);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
+
+  async function uploadAsset(file: File) {
+    setUploadingAsset(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("tipo", assetTipo);
+      if (assetProdotto) form.append("prodotto", assetProdotto);
+      if (assetSottoModello) form.append("sotto_modello", assetSottoModello);
+      if (assetVariante) form.append("variante_montaggio", assetVariante);
+      if (assetColore) form.append("colore", assetColore);
+      const res = await fetch(`/api/drafts/${draft.id}/assets`, { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setDraft(data.draft);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploadingAsset(false);
+    }
+  }
+
+  async function deleteAsset(assetPath: string) {
+    const res = await fetch(`/api/drafts/${draft.id}/assets?path=${encodeURIComponent(assetPath)}`, {
+      method: "DELETE",
+    });
     const data = await res.json();
     if (!res.ok) {
       alert(data.error);
@@ -212,6 +275,90 @@ export function DraftEditor({ initialDraft }: Props) {
           />
         </label>
         {draft.letterheadFileName && <p className="muted">Caricata: {draft.letterheadFileName}</p>}
+
+        <label>
+          Logo (PNG, SVG, JPEG o WebP)
+          <input
+            type="file"
+            accept="image/png,image/svg+xml,image/jpeg,image/webp"
+            disabled={uploadingLogo}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void uploadLogo(file);
+            }}
+          />
+        </label>
+        {uploadingLogo && <p className="muted">Caricamento…</p>}
+        {draft.logoFileName && <p className="muted">Caricato: {draft.logoFileName}</p>}
+      </section>
+
+      <section>
+        <h2>6b. Immagini prodotto (foto, rendering)</h2>
+        <p className="muted">
+          Facoltativo — foto e rendering dei modelli, associabili a prodotto/sotto-modello/variante/colore.
+          Non ancora usate dal motore di calcolo, verranno esportate nel bundle come materiale di riferimento.
+        </p>
+        <div className="asset-upload-fields">
+          <label>
+            Tipo
+            <select
+              value={assetTipo}
+              onChange={(e) => setAssetTipo(e.target.value as AssetManifestEntry["tipo"])}
+            >
+              <option value="foto">Foto</option>
+              <option value="rendering">Rendering</option>
+              <option value="altro">Altro</option>
+            </select>
+          </label>
+          <label>
+            Prodotto (opz.)
+            <input value={assetProdotto} onChange={(e) => setAssetProdotto(e.target.value)} />
+          </label>
+          <label>
+            Sotto-modello (opz.)
+            <input value={assetSottoModello} onChange={(e) => setAssetSottoModello(e.target.value)} />
+          </label>
+          <label>
+            Variante montaggio (opz.)
+            <input value={assetVariante} onChange={(e) => setAssetVariante(e.target.value)} />
+          </label>
+          <label>
+            Colore (opz.)
+            <input value={assetColore} onChange={(e) => setAssetColore(e.target.value)} />
+          </label>
+          <label>
+            File (PNG, JPEG o WebP)
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              disabled={uploadingAsset}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void uploadAsset(file);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
+        {uploadingAsset && <p className="muted">Caricamento…</p>}
+        {draft.assets && draft.assets.length > 0 && (
+          <ul className="asset-list">
+            {draft.assets.map((a) => (
+              <li key={a.path}>
+                <span>
+                  [{TIPO_LABELS[a.tipo]}] {a.path.split("/").pop()}
+                  {a.prodotto ? ` — ${a.prodotto}` : ""}
+                  {a.sotto_modello ? ` / ${a.sotto_modello}` : ""}
+                  {a.variante_montaggio ? ` / ${a.variante_montaggio}` : ""}
+                  {a.colore ? ` / ${a.colore}` : ""}
+                </span>
+                <button type="button" onClick={() => void deleteAsset(a.path)}>
+                  Rimuovi
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section>

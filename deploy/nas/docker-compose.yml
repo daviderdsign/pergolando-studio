@@ -10,6 +10,10 @@
 #                              catalog/, branding/)
 #   pergolando-backend/      (git clone of the backend repo)
 #   pergolando-frontend/     (git clone of the frontend repo)
+#   pergolando-studio/       (git clone of the Studio/monorepo root — the
+#                              internal catalog-authoring tool, one instance
+#                              for all clients, not per-tenant like the two
+#                              services above)
 #
 # Verified end-to-end on the real NAS deploy (2026-09-20): register -> login
 # -> wizard loading the real bundle catalog, through the public Cloudflare
@@ -51,6 +55,22 @@ services:
         NEXT_PUBLIC_API_URL: "https://pergolando-api.rdsign-app.it"
     restart: unless-stopped
 
+  studio:
+    build:
+      context: ./pergolando-studio
+      dockerfile: apps/studio/Dockerfile
+      args:
+        # Served at pergolando.rdsign-app.it/studio via a Cloudflare Tunnel
+        # path route (see README.md) — single shared instance, not one per
+        # tenant. Next.js's basePath makes every internal link/asset URL
+        # resolve under /studio instead of /.
+        STUDIO_BASE_PATH: "/studio"
+    volumes:
+      # Drafts and exported bundles must survive rebuilds — same reasoning
+      # as backend_data below.
+      - studio_data:/app/apps/studio/storage
+    restart: unless-stopped
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel run
@@ -63,6 +83,8 @@ services:
     depends_on:
       - backend
       - frontend
+      - studio
 
 volumes:
   backend_data:
+  studio_data:
