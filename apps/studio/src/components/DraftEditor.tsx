@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Draft } from "@/lib/storage";
+import type { Draft, DraftTheme } from "@/lib/storage";
 import type { ValidationReport } from "@/lib/validate-bundle";
 import type { AssetManifestEntry } from "@pergolando/shared/schema";
 
@@ -362,6 +362,17 @@ export function DraftEditor({ initialDraft }: Props) {
       </section>
 
       <section>
+        <h2>6c. Anteprima App Venditore</h2>
+        <p className="muted">
+          Come apparirà indicativamente la pagina di accesso del venditore per questo cliente —
+          logo e colore primario del tema attuale. Non è l&apos;app reale (che richiede un
+          deployment a sé per ogni cliente), solo un&apos;anteprima per valutare il branding prima
+          di esportare.
+        </p>
+        <VenditorePreview draftId={draft.id} logoFileName={draft.logoFileName} theme={draft.theme} />
+      </section>
+
+      <section>
         <h2>7. Export bundle (STU-7)</h2>
         <label>
           Nota changelog
@@ -425,6 +436,49 @@ function ValidationReportView({ report }: { report: ValidationReport }) {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Self-contained mockup of the App Venditore login page, styled with the
+ * draft's current theme — not a live embed of the real app (each tenant is
+ * its own deployment, there's nothing running yet for an in-progress draft),
+ * just enough to judge the branding before exporting.
+ */
+function VenditorePreview({
+  draftId,
+  logoFileName,
+  theme,
+}: {
+  draftId: string;
+  logoFileName?: string;
+  theme: DraftTheme;
+}) {
+  const primario = theme.palette.primario || "#111827";
+
+  return (
+    <div className="venditore-preview">
+      <div className="venditore-preview-topbar">
+        {logoFileName && (
+          <img src={`/api/drafts/${draftId}/logo`} alt={theme.nome_azienda} />
+        )}
+        <span className="venditore-preview-lang">IT EN</span>
+      </div>
+      <div className="venditore-preview-body">
+        <h3>Accesso venditore</h3>
+        <label>
+          Email
+          <input type="email" disabled placeholder="venditore@esempio.it" />
+        </label>
+        <label>
+          Password
+          <input type="password" disabled placeholder="••••••••" />
+        </label>
+        <button type="button" disabled style={{ background: primario }}>
+          Accedi
+        </button>
+      </div>
     </div>
   );
 }

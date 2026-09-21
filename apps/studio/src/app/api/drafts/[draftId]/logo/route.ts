@@ -1,11 +1,36 @@
+import { readFile } from "node:fs/promises";
+import { extname } from "node:path";
 import { NextRequest, NextResponse } from "next/server";
-import { getDraft, saveDraft, saveLogo } from "@/lib/storage";
+import { getDraft, saveDraft, saveLogo, draftUploadPath } from "@/lib/storage";
 
 interface Params {
   params: Promise<{ draftId: string }>;
 }
 
 const ALLOWED_TYPES = new Set(["image/png", "image/svg+xml", "image/jpeg", "image/webp"]);
+
+const CONTENT_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+};
+
+/** Serves the currently uploaded logo — used by the Studio preview panel. */
+export async function GET(_req: NextRequest, { params }: Params) {
+  const { draftId } = await params;
+  const draft = await getDraft(draftId);
+  if (!draft?.logoFileName) {
+    return NextResponse.json({ error: "Nessun logo caricato." }, { status: 404 });
+  }
+
+  const bytes = await readFile(draftUploadPath(draftId, draft.logoFileName));
+  const contentType = CONTENT_TYPES[extname(draft.logoFileName).toLowerCase()] ?? "application/octet-stream";
+  return new NextResponse(new Uint8Array(bytes), {
+    headers: { "Content-Type": contentType },
+  });
+}
 
 /** STU-6: upload the tenant's logo (used as theme.logo_path for the App Venditore). */
 export async function POST(req: NextRequest, { params }: Params) {
