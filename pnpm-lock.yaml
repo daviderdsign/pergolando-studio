@@ -33,8 +33,8 @@ importers:
   apps/studio:
     dependencies:
       '@pergolando/shared':
-        specifier: github:daviderdsign/pergolando-shared#v0.1.0
-        version: https://codeload.github.com/daviderdsign/pergolando-shared/tar.gz/e1b89539277758a613fd5efc3c8da5c3dfc31b35
+        specifier: github:daviderdsign/pergolando-shared#v0.2.0
+        version: https://codeload.github.com/daviderdsign/pergolando-shared/tar.gz/10c62814f70c3e205e510b95b1301195f4909e21
       adm-zip:
         specifier: ^0.5.16
         version: 0.5.18
@@ -425,8 +425,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@pergolando/shared@https://codeload.github.com/daviderdsign/pergolando-shared/tar.gz/e1b89539277758a613fd5efc3c8da5c3dfc31b35':
-    resolution: {gitHosted: true, integrity: sha512-5DSvPWcs1s320Q5yzyeX9wFhhZz7SnXiXD3JSZrHGPTXfT/fIfBD1ERx3hr6HUUMVbQGTtA3UYmxT8/peLGoLQ==, tarball: https://codeload.github.com/daviderdsign/pergolando-shared/tar.gz/e1b89539277758a613fd5efc3c8da5c3dfc31b35}
+  '@pergolando/shared@https://codeload.github.com/daviderdsign/pergolando-shared/tar.gz/10c62814f70c3e205e510b95b1301195f4909e21':
+    resolution: {gitHosted: true, integrity: sha512-7KdARsUvhPP17fRPep4QTJ/fWFYTV22aO1fw96DRXET2weDvRnfi7df2lqsTPsOYVDj3yGpQeRcKxcpsPlCnRw==, tarball: https://codeload.github.com/daviderdsign/pergolando-shared/tar.gz/10c62814f70c3e205e510b95b1301195f4909e21}
     version: 0.1.0
     engines: {node: '>=24'}
 
@@ -1216,7 +1216,7 @@ snapshots:
   '@next/swc-win32-x64-msvc@16.3.5':
     optional: true
 
-  '@pergolando/shared@https://codeload.github.com/daviderdsign/pergolando-shared/tar.gz/e1b89539277758a613fd5efc3c8da5c3dfc31b35':
+  '@pergolando/shared@https://codeload.github.com/daviderdsign/pergolando-shared/tar.gz/10c62814f70c3e205e510b95b1301195f4909e21':
     dependencies:
       zod: 3.25.76
 

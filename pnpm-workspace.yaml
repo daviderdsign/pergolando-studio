@@ -2,4 +2,5 @@ packages:
   - "apps/*"
 allowBuilds:
   esbuild: true
-  "@pergolando/shared@https://codeload.github.com/daviderdsign/pergolando-shared/tar.gz/e1b89539277758a613fd5efc3c8da5c3dfc31b35": true
+  "@pergolando/shared@https://codeload.github.com/daviderdsign/pergolando-shared/tar.gz/10c62814f70c3e205e510b95b1301195f4909e21": true
+  "@pergolando/shared@https://codeload.github.com/daviderdsign/pergolando-shared/tar.gz/e1b89539277758a613fd5efc3c8da5c3dfc31b35": false
