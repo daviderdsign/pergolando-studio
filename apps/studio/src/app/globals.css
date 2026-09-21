@@ -131,3 +131,68 @@ button:disabled {
   background: #fef2f2;
   border: 1px solid #fecaca;
 }
+
+.venditore-preview {
+  max-width: 360px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.venditore-preview-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.venditore-preview-topbar img {
+  max-height: 2rem;
+  max-width: 8rem;
+  object-fit: contain;
+}
+
+.venditore-preview-lang {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.venditore-preview-body {
+  padding: 1.5rem 1.25rem;
+  background: white;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.venditore-preview-body h3 {
+  margin: 0 0 0.25rem;
+}
+
+.venditore-preview-body label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.venditore-preview-body input {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.venditore-preview-body button {
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  font-weight: 600;
+  width: fit-content;
+  cursor: default;
+}
