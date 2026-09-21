@@ -3,7 +3,13 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import AdmZip from "adm-zip";
 import { CURRENT_SCHEMA_VERSION } from "@pergolando/shared/schema";
-import { bundleExportDir, listBundleVersions, draftUploadPath, type Draft } from "./storage";
+import {
+  bundleExportDir,
+  listBundleVersions,
+  draftUploadPath,
+  draftAssetPath,
+  type Draft,
+} from "./storage";
 
 /**
  * STU-7: exports an immutable, versioned bundle folder (manifest.json,
@@ -61,6 +67,29 @@ export async function exportBundle(
     if (existsSync(src)) {
       await copyFile(src, path.join(dir, "branding", draft.letterheadFileName));
     }
+  }
+
+  if (draft.logoFileName) {
+    const src = draftUploadPath(draft.id, draft.logoFileName);
+    if (existsSync(src)) {
+      await copyFile(src, path.join(dir, "branding", draft.logoFileName));
+    }
+  }
+
+  if (draft.assets && draft.assets.length > 0) {
+    await mkdir(path.join(dir, "assets"), { recursive: true });
+    for (const asset of draft.assets) {
+      const fileName = asset.path.split("/").pop()!;
+      const src = draftAssetPath(draft.id, fileName);
+      if (existsSync(src)) {
+        await copyFile(src, path.join(dir, asset.path));
+      }
+    }
+    await writeFile(
+      path.join(dir, "assets", "manifest.json"),
+      JSON.stringify(draft.assets, null, 2),
+      "utf-8",
+    );
   }
 
   const changelogPath = path.join(path.dirname(dir), "CHANGELOG.md");
