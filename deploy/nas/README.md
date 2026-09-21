@@ -28,7 +28,11 @@ cd /path/alla/cartella/Pergolando
 
 git clone https://github.com/daviderdsign/pergolando-backend.git
 git clone https://github.com/daviderdsign/pergolando-frontend.git
+git clone https://github.com/daviderdsign/pergolando-studio.git
 ```
+
+`pergolando-studio` è un'istanza sola, condivisa da tutti i clienti (non un tenant come le due
+sopra) — è lo strumento interno di catalogazione, non l'app che vede il venditore.
 
 Poi copia in questa stessa cartella i file da `deploy/nas/` di questo repo
 (`docker-compose.yml`, `backend.env.example`, `.env.example`) — sono quelli che stai leggendo ora.
@@ -45,7 +49,8 @@ Pergolando/
 ├── .env.example          -> copialo in .env e compilalo (TUNNEL_TOKEN)
 ├── bundle/                (lo crei al passo 2)
 ├── pergolando-backend/
-└── pergolando-frontend/
+├── pergolando-frontend/
+└── pergolando-studio/
 ```
 
 ## 2. Il bundle del tenant
@@ -115,6 +120,18 @@ dashboard, non fidarti ciecamente di questi screenshot testuali.
    "Tunnel"** (non un CNAME manuale) — se per qualche motivo il DNS non si crea da solo, non
    aggiungere un CNAME a mano puntato a `<tunnel-uuid>.cfargotunnel.com`: cancella e ricrea la
    route dal tab Routes del tunnel, così Cloudflare genera il record giusto.
+6. Aggiungi una **terza route per Studio**, sullo **stesso hostname del frontend** ma con un path,
+   non un nuovo sottodominio (Studio è uno strumento interno condiviso, non un tenant):
+
+   | Hostname | Path | Service |
+   | --- | --- | --- |
+   | `<tenant>.tuodominio.it` | `/studio*` | `http://studio:3000` |
+
+   Questa route deve avere **priorità sulla route del frontend sullo stesso hostname** (senza
+   path, che fa da catch-all) — se l'interfaccia non ti lascia scegliere l'ordine esplicitamente,
+   controlla comunque il risultato al passo 6: se `/studio` mostra la pagina di login del venditore
+   invece di Studio, le due route sono nell'ordine sbagliato o quella di Studio non ha il path
+   impostato correttamente.
 
 Con due sottodomini invece di un percorso condiviso, frontend e backend sono tecnicamente due
 origin diversi per il browser: è lo stesso meccanismo CORS già usato e verificato in sviluppo
@@ -151,6 +168,15 @@ che è "cotto" nel bundle JS in fase di build — serve `docker compose up --bui
 solo un restart, e conviene forzare un hard-reload nel browser (la vecchia versione può restare
 in cache).
 
+Verifica anche Studio, sullo stesso dominio con il path:
+
+```
+https://<tenant>.tuodominio.it/studio
+```
+
+Deve apparire la home di Studio (creazione bozze), non la pagina di login del venditore — se vedi
+quella, vedi il punto 6 del passo 4 (ordine delle route Cloudflare).
+
 ## 7. Sullo smartphone
 
 Nessun passo aggiuntivo: essendo dietro Cloudflare Tunnel con dominio e HTTPS veri, è un normale
@@ -163,16 +189,20 @@ wizard), è la prossima cosa da sistemare, non un bug bloccante.
 ```bash
 cd pergolando-backend && git pull && cd ..
 cd pergolando-frontend && git pull && cd ..
+cd pergolando-studio && git pull && cd ..
 docker compose up --build -d
 ```
 
 ## Un secondo tenant
 
-Copia l'intera cartella in una nuova cartella dedicata, cambia il bundle in `bundle/`, il dominio
-in `backend.env`/`NEXT_PUBLIC_API_URL` nel `docker-compose.yml`, crea un secondo tunnel Cloudflare
-con un secondo sottodominio (schema `<tenant>.tuodominio.it` / `<tenant>-api.tuodominio.it`), e
-usa `docker compose -p <tenant> up -d` (il flag `-p` dà un nome di progetto diverso così i
-container e i volumi non si mescolano con gli altri tenant).
+Studio **non si duplica** — è condiviso, resta una sola istanza per tutti i clienti. Solo
+`backend`/`frontend` sono per-tenant: copia la cartella (senza `pergolando-studio/`, non serve) in
+una nuova cartella dedicata, cambia il bundle in `bundle/`, il dominio in
+`backend.env`/`NEXT_PUBLIC_API_URL` nel `docker-compose.yml` (rimuovi anche il servizio `studio`
+da questa seconda copia del `docker-compose.yml`), crea un secondo tunnel Cloudflare con un secondo
+sottodominio (schema `<tenant>.tuodominio.it` / `<tenant>-api.tuodominio.it`), e usa
+`docker compose -p <tenant> up -d` (il flag `-p` dà un nome di progetto diverso così i container e
+i volumi non si mescolano con gli altri tenant).
 
 ## Problemi già affrontati
 
@@ -228,3 +258,21 @@ vecchia copia in `/var/lib/docker`. Se un container con volumi (es. Postgres) va
 (controlla con `stat` su un file del volume — se il proprietario non cambia dopo un `chown`
 esplicito, il filesystem è il problema, non i permessi) — sposta invece su un volume ext4/btrfs
 vero.
+
+**Attenzione — spostare il `data-root` di Docker non basta.** `containerd` (il motore sotto Docker
+che gestisce davvero i layer delle immagini) ha una sua directory di stato separata,
+`/var/lib/containerd`, che **non segue** `data-root` in `/etc/docker/daemon.json`. Se dopo aver
+spostato `data-root` sul volume grande il disco di sistema si riempie comunque durante una build
+(`No space left on device`, verificato scomponendo l'errore fino a `dpkg: ... failed to write ...`
+su `/var/lib/containerd/...`), è questo il motivo. Rimedio rapido, senza toccare la
+configurazione di sistema (interviene su tutti i container del NAS, non solo Pergolando, quindi
+va pianificato con calma):
+
+```bash
+docker builder prune -af
+docker image prune -af
+```
+
+Libera spazio in pochi secondi rimuovendo build cache e immagini non usate, sufficiente per
+sbloccare una build. Lo spostamento vero e proprio di `/var/lib/containerd` (editando
+`/etc/containerd/config.toml`, `root`/`state`) resta da fare come intervento strutturale separato.

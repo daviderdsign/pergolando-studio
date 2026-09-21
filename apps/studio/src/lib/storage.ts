@@ -2,6 +2,7 @@ import { mkdir, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import type { AssetManifestEntry } from "@pergolando/shared/schema";
 
 /**
  * Local-disk, per-draft storage for the Studio MVP (STU-1..STU-7). No
@@ -41,6 +42,9 @@ export interface Draft {
   priceMatrices: unknown;
   theme: DraftTheme;
   letterheadFileName?: string;
+  logoFileName?: string;
+  /** Product photos/renderings (STU placeholder in the shared schema, populated by Studio). */
+  assets?: AssetManifestEntry[];
 }
 
 export interface TableCandidate {
@@ -120,6 +124,29 @@ export async function saveLetterhead(draftId: string, bytes: Buffer, fileName: s
   const dest = path.join(draftDir(draftId), fileName);
   await writeFile(dest, bytes);
   return dest;
+}
+
+export async function saveLogo(draftId: string, bytes: Buffer, fileName: string): Promise<string> {
+  await mkdir(draftDir(draftId), { recursive: true });
+  const dest = path.join(draftDir(draftId), fileName);
+  await writeFile(dest, bytes);
+  return dest;
+}
+
+function assetsDir(draftId: string): string {
+  return path.join(draftDir(draftId), "assets");
+}
+
+/** Asset files are namespaced under assets/ so they never collide with the catalog PDF or letterhead. */
+export async function saveAssetFile(draftId: string, bytes: Buffer, fileName: string): Promise<string> {
+  await mkdir(assetsDir(draftId), { recursive: true });
+  const dest = path.join(assetsDir(draftId), fileName);
+  await writeFile(dest, bytes);
+  return dest;
+}
+
+export function draftAssetPath(draftId: string, fileName: string): string {
+  return path.join(assetsDir(draftId), fileName);
 }
 
 export function draftUploadPath(draftId: string, fileName: string): string {
