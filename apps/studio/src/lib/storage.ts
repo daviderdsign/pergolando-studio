@@ -160,10 +160,25 @@ export async function bundleExportDir(tenantId: string, version: string): Promis
   return dir;
 }
 
+const SEMVER = /^\d+\.\d+\.\d+$/;
+
+/**
+ * Only version directories, sorted numerically (not lexicographically —
+ * "0.10.0" must sort after "0.2.0", and stray siblings like CHANGELOG.md or
+ * the exported .zip files must never be mistaken for a version).
+ */
 export async function listBundleVersions(tenantId: string): Promise<string[]> {
   const tenantDir = path.join(BUNDLES_DIR, tenantId);
   if (!existsSync(tenantDir)) return [];
-  return (await readdir(tenantDir)).sort();
+  const entries = await readdir(tenantDir, { withFileTypes: true });
+  return entries
+    .filter((e) => e.isDirectory() && SEMVER.test(e.name))
+    .map((e) => e.name)
+    .sort((a, b) => {
+      const pa = a.split(".").map(Number);
+      const pb = b.split(".").map(Number);
+      return pa[0]! - pb[0]! || pa[1]! - pb[1]! || pa[2]! - pb[2]!;
+    });
 }
 
 export { BUNDLES_DIR };
