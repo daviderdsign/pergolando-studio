@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Draft, DraftTheme } from "@/lib/storage";
 import type { ValidationReport } from "@/lib/validate-bundle";
 import type { AssetManifestEntry } from "@pergolando/shared/schema";
+import { apiPath } from "@/lib/base-path";
 
 const TIPO_LABELS: Record<AssetManifestEntry["tipo"], string> = {
   foto: "Foto",
@@ -52,7 +53,7 @@ export function DraftEditor({ initialDraft }: Props) {
     }
     setSaving(true);
     try {
-      const res = await fetch(`/api/drafts/${draft.id}`, {
+      const res = await fetch(apiPath(`/api/drafts/${draft.id}`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ database, priceMatrices }),
@@ -74,7 +75,7 @@ export function DraftEditor({ initialDraft }: Props) {
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch(`/api/drafts/${draft.id}/upload`, { method: "POST", body: form });
+      const res = await fetch(apiPath(`/api/drafts/${draft.id}/upload`), { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setDraft(data.draft);
@@ -88,7 +89,7 @@ export function DraftEditor({ initialDraft }: Props) {
   async function uploadLetterhead(file: File) {
     const form = new FormData();
     form.append("file", file);
-    const res = await fetch(`/api/drafts/${draft.id}/letterhead`, { method: "POST", body: form });
+    const res = await fetch(apiPath(`/api/drafts/${draft.id}/letterhead`), { method: "POST", body: form });
     const data = await res.json();
     if (!res.ok) {
       alert(data.error);
@@ -102,7 +103,7 @@ export function DraftEditor({ initialDraft }: Props) {
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch(`/api/drafts/${draft.id}/logo`, { method: "POST", body: form });
+      const res = await fetch(apiPath(`/api/drafts/${draft.id}/logo`), { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setDraft(data.draft);
@@ -123,7 +124,7 @@ export function DraftEditor({ initialDraft }: Props) {
       if (assetSottoModello) form.append("sotto_modello", assetSottoModello);
       if (assetVariante) form.append("variante_montaggio", assetVariante);
       if (assetColore) form.append("colore", assetColore);
-      const res = await fetch(`/api/drafts/${draft.id}/assets`, { method: "POST", body: form });
+      const res = await fetch(apiPath(`/api/drafts/${draft.id}/assets`), { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setDraft(data.draft);
@@ -135,7 +136,7 @@ export function DraftEditor({ initialDraft }: Props) {
   }
 
   async function deleteAsset(assetPath: string) {
-    const res = await fetch(`/api/drafts/${draft.id}/assets?path=${encodeURIComponent(assetPath)}`, {
+    const res = await fetch(apiPath(`/api/drafts/${draft.id}/assets?path=${encodeURIComponent(assetPath)}`), {
       method: "DELETE",
     });
     const data = await res.json();
@@ -149,7 +150,7 @@ export function DraftEditor({ initialDraft }: Props) {
   async function runValidation() {
     setValidating(true);
     try {
-      const res = await fetch(`/api/drafts/${draft.id}/validate`, { method: "POST" });
+      const res = await fetch(apiPath(`/api/drafts/${draft.id}/validate`), { method: "POST" });
       const data = await res.json();
       setReport(data.report);
     } finally {
@@ -160,7 +161,7 @@ export function DraftEditor({ initialDraft }: Props) {
   async function runExport() {
     setExporting(true);
     try {
-      const res = await fetch(`/api/drafts/${draft.id}/export`, {
+      const res = await fetch(apiPath(`/api/drafts/${draft.id}/export`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ changelogNote }),
@@ -387,7 +388,7 @@ export function DraftEditor({ initialDraft }: Props) {
         {exportResult && (
           <p>
             Bundle versione <strong>{exportResult.version}</strong> esportato.{" "}
-            <a href={exportResult.downloadUrl}>Scarica zip</a>
+            <a href={apiPath(exportResult.downloadUrl)}>Scarica zip</a>
           </p>
         )}
       </section>
@@ -461,7 +462,7 @@ function VenditorePreview({
     <div className="venditore-preview">
       <div className="venditore-preview-topbar">
         {logoFileName && (
-          <img src={`/api/drafts/${draftId}/logo`} alt={theme.nome_azienda} />
+          <img src={apiPath(`/api/drafts/${draftId}/logo`)} alt={theme.nome_azienda} />
         )}
         <span className="venditore-preview-lang">IT EN</span>
       </div>

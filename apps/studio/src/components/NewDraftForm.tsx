@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiPath } from "@/lib/base-path";
 
 export function NewDraftForm() {
   const router = useRouter();
@@ -16,7 +17,7 @@ export function NewDraftForm() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch("/api/drafts", {
+      const res = await fetch(apiPath("/api/drafts"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tenantId, nomeAzienda, template }),
