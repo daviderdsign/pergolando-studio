@@ -4,7 +4,10 @@ import { useState } from "react";
 import type { Draft, DraftTheme } from "@/lib/storage";
 import type { ValidationReport } from "@/lib/validate-bundle";
 import type { AssetManifestEntry } from "@pergolando/shared/schema";
+import type { ProjectSummary } from "@/lib/draft-progress";
 import { apiPath } from "@/lib/base-path";
+import { StudioShell } from "./StudioShell";
+import { ProjectRow } from "./ProjectRow";
 
 const TIPO_LABELS: Record<AssetManifestEntry["tipo"], string> = {
   foto: "Foto",
@@ -14,9 +17,10 @@ const TIPO_LABELS: Record<AssetManifestEntry["tipo"], string> = {
 
 interface Props {
   initialDraft: Draft;
+  projects: ProjectSummary[];
 }
 
-export function DraftEditor({ initialDraft }: Props) {
+export function DraftEditor({ initialDraft, projects }: Props) {
   const [draft, setDraft] = useState(initialDraft);
   const [databaseText, setDatabaseText] = useState(JSON.stringify(initialDraft.database, null, 2));
   const [priceMatricesText, setPriceMatricesText] = useState(
@@ -178,52 +182,172 @@ export function DraftEditor({ initialDraft }: Props) {
     }
   }
 
+  const heroAsset = draft.assets?.[0];
+  const heroImageUrl = heroAsset
+    ? apiPath(`/api/drafts/${draft.id}/assets?path=${encodeURIComponent(heroAsset.path)}`)
+    : undefined;
+
   return (
-    <main className="page">
+    <StudioShell heroImageUrl={heroImageUrl}>
+      <ProjectRow items={projects} currentId={draft.id} />
+
       <p>
-        <a href="/">&larr; Bozze</a>
+        <a href="/">&larr; Progetti</a>
       </p>
       <h1>{draft.nomeAzienda}</h1>
       <p className="muted">tenant: {draft.tenantId}</p>
 
-      <section>
-        <h2>1. Ingest PDF (STU-1)</h2>
-        <input
-          type="file"
-          accept="application/pdf"
-          disabled={uploading}
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) void uploadPdf(file);
-          }}
-        />
-        {uploading && <p className="muted">Estrazione in corso…</p>}
-        {draft.extractedText && (
-          <details>
-            <summary>Testo estratto ({draft.extractedText.length} caratteri)</summary>
-            <pre className="extracted-text">{draft.extractedText}</pre>
-          </details>
-        )}
-        {draft.tableCandidates && draft.tableCandidates.length > 0 && (
-          <details>
-            <summary>
-              Blocchi tabellari candidati ({draft.tableCandidates.length}) — da verificare manualmente,
-              non ancora affidabili
-            </summary>
-            {draft.tableCandidates.map((tc, i) => (
-              <div key={i}>
-                <p className="muted">Pagina {tc.page}</p>
-                <pre className="extracted-text">
-                  {tc.rows.map((r) => r.join(" | ")).join("\n")}
-                </pre>
-              </div>
-            ))}
-          </details>
-        )}
+      <section className="studio-section">
+        <h2 className="section-title">File caricati</h2>
+
+        <div className="upload-group">
+          <label className="upload-group-label" htmlFor="upload-catalogo">
+            Cataloghi <span className="muted">(PDF)</span>
+          </label>
+          <input
+            id="upload-catalogo"
+            type="file"
+            accept="application/pdf"
+            disabled={uploading}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void uploadPdf(file);
+            }}
+          />
+          {uploading && <p className="muted upload-group-status">Estrazione in corso…</p>}
+          {draft.extractedText && (
+            <details className="upload-group-status">
+              <summary>Testo estratto ({draft.extractedText.length} caratteri)</summary>
+              <pre className="extracted-text">{draft.extractedText}</pre>
+            </details>
+          )}
+          {draft.tableCandidates && draft.tableCandidates.length > 0 && (
+            <details className="upload-group-status">
+              <summary>
+                Blocchi tabellari candidati ({draft.tableCandidates.length}) — da verificare
+                manualmente, non ancora affidabili
+              </summary>
+              {draft.tableCandidates.map((tc, i) => (
+                <div key={i}>
+                  <p className="muted">Pagina {tc.page}</p>
+                  <pre className="extracted-text">{tc.rows.map((r) => r.join(" | ")).join("\n")}</pre>
+                </div>
+              ))}
+            </details>
+          )}
+        </div>
+
+        <div className="upload-group">
+          <label className="upload-group-label" htmlFor="upload-letterhead">
+            Carta intestata <span className="muted">(PDF o SVG)</span>
+          </label>
+          <input
+            id="upload-letterhead"
+            type="file"
+            accept="application/pdf,image/svg+xml"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void uploadLetterhead(file);
+            }}
+          />
+          {draft.letterheadFileName && (
+            <p className="muted upload-group-status">Caricata: {draft.letterheadFileName}</p>
+          )}
+        </div>
+
+        <div className="upload-group">
+          <label className="upload-group-label" htmlFor="upload-logo">
+            Logo <span className="muted">(PNG, JPG, SVG o WebP)</span>
+          </label>
+          <input
+            id="upload-logo"
+            type="file"
+            accept="image/png,image/svg+xml,image/jpeg,image/webp"
+            disabled={uploadingLogo}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void uploadLogo(file);
+            }}
+          />
+          {uploadingLogo && <p className="muted upload-group-status">Caricamento…</p>}
+          {draft.logoFileName && (
+            <p className="muted upload-group-status">Caricato: {draft.logoFileName}</p>
+          )}
+        </div>
+
+        <div className="upload-group">
+          <label className="upload-group-label" htmlFor="upload-asset">
+            Immagini prodotto <span className="muted">(PNG, JPG o WebP)</span>
+          </label>
+          <p className="muted">
+            Facoltativo — foto e rendering dei modelli, associabili a prodotto/sotto-modello/variante/
+            colore. Non ancora usate dal motore di calcolo, verranno esportate nel bundle come
+            materiale di riferimento.
+          </p>
+          <div className="field-inline-row">
+            <label>
+              Tipo
+              <select
+                value={assetTipo}
+                onChange={(e) => setAssetTipo(e.target.value as AssetManifestEntry["tipo"])}
+              >
+                <option value="foto">Foto</option>
+                <option value="rendering">Rendering</option>
+                <option value="altro">Altro</option>
+              </select>
+            </label>
+            <label>
+              Modello
+              <input value={assetProdotto} onChange={(e) => setAssetProdotto(e.target.value)} />
+            </label>
+            <label>
+              Sotto-Modello
+              <input value={assetSottoModello} onChange={(e) => setAssetSottoModello(e.target.value)} />
+            </label>
+            <label>
+              Variante
+              <input value={assetVariante} onChange={(e) => setAssetVariante(e.target.value)} />
+            </label>
+            <label>
+              Colore
+              <input value={assetColore} onChange={(e) => setAssetColore(e.target.value)} />
+            </label>
+          </div>
+          <input
+            id="upload-asset"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            disabled={uploadingAsset}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void uploadAsset(file);
+              e.target.value = "";
+            }}
+          />
+          {uploadingAsset && <p className="muted upload-group-status">Caricamento…</p>}
+          {draft.assets && draft.assets.length > 0 && (
+            <ul className="asset-list">
+              {draft.assets.map((a) => (
+                <li key={a.path}>
+                  <span>
+                    [{TIPO_LABELS[a.tipo]}] {a.path.split("/").pop()}
+                    {a.prodotto ? ` — ${a.prodotto}` : ""}
+                    {a.sotto_modello ? ` / ${a.sotto_modello}` : ""}
+                    {a.variante_montaggio ? ` / ${a.variante_montaggio}` : ""}
+                    {a.colore ? ` / ${a.colore}` : ""}
+                  </span>
+                  <button type="button" className="btn-secondary" onClick={() => void deleteAsset(a.path)}>
+                    Rimuovi
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </section>
 
-      <section>
-        <h2>2-4. Mappatura nello schema del bundle (STU-2/3/4)</h2>
+      <section className="studio-section">
+        <h2 className="section-title">Mappatura</h2>
         <p className="muted">
           Correggi manualmente ciò che l&apos;estrazione automatica non prende bene — la revisione
           umana è obbligatoria prima dell&apos;export.
@@ -254,116 +378,34 @@ export function DraftEditor({ initialDraft }: Props) {
         </button>
       </section>
 
-      <section>
-        <h2>5. Validazione (STU-5)</h2>
+      <section className="studio-section">
+        <h2 className="section-title">Validazione</h2>
         <button onClick={runValidation} disabled={validating}>
           {validating ? "Validazione…" : "Valida"}
         </button>
         {report && <ValidationReportView report={report} />}
       </section>
 
-      <section>
-        <h2>6. Branding (STU-6)</h2>
+      <section className="studio-section">
+        <h2 className="section-title">Export bundle</h2>
         <label>
-          Carta intestata (PDF o SVG)
-          <input
-            type="file"
-            accept="application/pdf,image/svg+xml"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void uploadLetterhead(file);
-            }}
-          />
+          Nota changelog
+          <input value={changelogNote} onChange={(e) => setChangelogNote(e.target.value)} />
         </label>
-        {draft.letterheadFileName && <p className="muted">Caricata: {draft.letterheadFileName}</p>}
-
-        <label>
-          Logo (PNG, SVG, JPEG o WebP)
-          <input
-            type="file"
-            accept="image/png,image/svg+xml,image/jpeg,image/webp"
-            disabled={uploadingLogo}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void uploadLogo(file);
-            }}
-          />
-        </label>
-        {uploadingLogo && <p className="muted">Caricamento…</p>}
-        {draft.logoFileName && <p className="muted">Caricato: {draft.logoFileName}</p>}
-      </section>
-
-      <section>
-        <h2>6b. Immagini prodotto (foto, rendering)</h2>
-        <p className="muted">
-          Facoltativo — foto e rendering dei modelli, associabili a prodotto/sotto-modello/variante/colore.
-          Non ancora usate dal motore di calcolo, verranno esportate nel bundle come materiale di riferimento.
-        </p>
-        <div className="asset-upload-fields">
-          <label>
-            Tipo
-            <select
-              value={assetTipo}
-              onChange={(e) => setAssetTipo(e.target.value as AssetManifestEntry["tipo"])}
-            >
-              <option value="foto">Foto</option>
-              <option value="rendering">Rendering</option>
-              <option value="altro">Altro</option>
-            </select>
-          </label>
-          <label>
-            Prodotto (opz.)
-            <input value={assetProdotto} onChange={(e) => setAssetProdotto(e.target.value)} />
-          </label>
-          <label>
-            Sotto-modello (opz.)
-            <input value={assetSottoModello} onChange={(e) => setAssetSottoModello(e.target.value)} />
-          </label>
-          <label>
-            Variante montaggio (opz.)
-            <input value={assetVariante} onChange={(e) => setAssetVariante(e.target.value)} />
-          </label>
-          <label>
-            Colore (opz.)
-            <input value={assetColore} onChange={(e) => setAssetColore(e.target.value)} />
-          </label>
-          <label>
-            File (PNG, JPEG o WebP)
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              disabled={uploadingAsset}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void uploadAsset(file);
-                e.target.value = "";
-              }}
-            />
-          </label>
-        </div>
-        {uploadingAsset && <p className="muted">Caricamento…</p>}
-        {draft.assets && draft.assets.length > 0 && (
-          <ul className="asset-list">
-            {draft.assets.map((a) => (
-              <li key={a.path}>
-                <span>
-                  [{TIPO_LABELS[a.tipo]}] {a.path.split("/").pop()}
-                  {a.prodotto ? ` — ${a.prodotto}` : ""}
-                  {a.sotto_modello ? ` / ${a.sotto_modello}` : ""}
-                  {a.variante_montaggio ? ` / ${a.variante_montaggio}` : ""}
-                  {a.colore ? ` / ${a.colore}` : ""}
-                </span>
-                <button type="button" onClick={() => void deleteAsset(a.path)}>
-                  Rimuovi
-                </button>
-              </li>
-            ))}
-          </ul>
+        <button onClick={runExport} disabled={exporting || (report !== null && !report.passed)}>
+          {exporting ? "Export…" : "Esporta"}
+        </button>
+        {report && !report.passed && <p className="error">Valida con successo prima di esportare.</p>}
+        {exportResult && (
+          <p>
+            Bundle versione <strong>{exportResult.version}</strong> esportato.{" "}
+            <a href={apiPath(exportResult.downloadUrl)}>Scarica zip</a>
+          </p>
         )}
       </section>
 
-      <section>
-        <h2>6c. Anteprima App Venditore</h2>
+      <section className="studio-section">
+        <h2 className="section-title">Anteprima App Venditore</h2>
         <p className="muted">
           Come apparirà indicativamente la pagina di accesso del venditore per questo cliente —
           logo e colore primario del tema attuale. Non è l&apos;app reale (che richiede un
@@ -372,27 +414,7 @@ export function DraftEditor({ initialDraft }: Props) {
         </p>
         <VenditorePreview draftId={draft.id} logoFileName={draft.logoFileName} theme={draft.theme} />
       </section>
-
-      <section>
-        <h2>7. Export bundle (STU-7)</h2>
-        <label>
-          Nota changelog
-          <input value={changelogNote} onChange={(e) => setChangelogNote(e.target.value)} />
-        </label>
-        <button onClick={runExport} disabled={exporting || (report !== null && !report.passed)}>
-          {exporting ? "Export…" : "Esporta bundle"}
-        </button>
-        {report && !report.passed && (
-          <p className="error">Valida con successo prima di esportare.</p>
-        )}
-        {exportResult && (
-          <p>
-            Bundle versione <strong>{exportResult.version}</strong> esportato.{" "}
-            <a href={apiPath(exportResult.downloadUrl)}>Scarica zip</a>
-          </p>
-        )}
-      </section>
-    </main>
+    </StudioShell>
   );
 }
 

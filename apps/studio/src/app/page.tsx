@@ -1,6 +1,9 @@
-import Link from "next/link";
 import { listDrafts } from "@/lib/storage";
+import { summarizeDrafts } from "@/lib/draft-progress";
 import { NewDraftForm } from "@/components/NewDraftForm";
+import { StudioShell } from "@/components/StudioShell";
+import { ProjectRow } from "@/components/ProjectRow";
+import { apiPath } from "@/lib/base-path";
 
 // The draft list changes constantly (new drafts, edits) — without this,
 // `next build` prerenders it once as static HTML and every deploy serves a
@@ -9,37 +12,21 @@ export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const drafts = await listDrafts();
+  const projects = await summarizeDrafts(drafts);
+  const mostRecent = drafts[0];
+  const heroAsset = mostRecent?.assets?.[0];
+  const heroImageUrl = heroAsset
+    ? apiPath(`/api/drafts/${mostRecent.id}/assets?path=${encodeURIComponent(heroAsset.path)}`)
+    : undefined;
 
   return (
-    <main className="page">
-      <h1>Pergolando Studio</h1>
-      <p className="subtitle">
-        Trasforma un catalogo PDF di un produttore in un bundle pronto per l&apos;App Venditore.
-      </p>
+    <StudioShell heroImageUrl={heroImageUrl}>
+      {projects.length > 0 && <ProjectRow items={projects} currentId={mostRecent?.id} />}
 
-      <section>
-        <h2>Nuovo bundle</h2>
+      <section className="studio-section">
+        <h2 className="section-title">Nuovo progetto</h2>
         <NewDraftForm />
       </section>
-
-      <section>
-        <h2>Bozze in corso</h2>
-        {drafts.length === 0 ? (
-          <p className="muted">Nessuna bozza ancora.</p>
-        ) : (
-          <ul className="draft-list">
-            {drafts.map((d) => (
-              <li key={d.id}>
-                <Link href={`/drafts/${d.id}`}>
-                  <strong>{d.nomeAzienda}</strong>
-                  <span className="muted"> — {d.tenantId}</span>
-                </Link>
-                <span className="muted"> · aggiornato {new Date(d.updatedAt).toLocaleString("it-IT")}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </main>
+    </StudioShell>
   );
 }

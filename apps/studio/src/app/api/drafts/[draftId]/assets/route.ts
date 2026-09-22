@@ -1,4 +1,6 @@
-import { rm } from "node:fs/promises";
+import { rm, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { extname } from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { getDraft, saveDraft, saveAssetFile, draftAssetPath } from "@/lib/storage";
 import type { AssetManifestEntry } from "@pergolando/shared/schema";
@@ -9,6 +11,37 @@ interface Params {
 
 const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const ALLOWED_TIPI = new Set(["foto", "rendering", "altro"]);
+
+const CONTENT_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+};
+
+/** Serves a single uploaded product asset by its manifest path — used for the hero image. */
+export async function GET(req: NextRequest, { params }: Params) {
+  const { draftId } = await params;
+  const { searchParams } = new URL(req.url);
+  const assetPath = searchParams.get("path");
+  if (!assetPath) {
+    return NextResponse.json({ error: "Parametro 'path' mancante." }, { status: 400 });
+  }
+
+  const fileName = assetPath.split("/").pop();
+  if (!fileName) {
+    return NextResponse.json({ error: "Percorso non valido." }, { status: 400 });
+  }
+
+  const filePath = draftAssetPath(draftId, fileName);
+  if (!existsSync(filePath)) {
+    return NextResponse.json({ error: "Asset non trovato." }, { status: 404 });
+  }
+
+  const bytes = await readFile(filePath);
+  const contentType = CONTENT_TYPES[extname(fileName).toLowerCase()] ?? "application/octet-stream";
+  return new NextResponse(new Uint8Array(bytes), { headers: { "Content-Type": contentType } });
+}
 
 /** Product photos/renderings — populates the assets/ placeholder the bundle schema reserves for Fase 5. */
 export async function POST(req: NextRequest, { params }: Params) {
