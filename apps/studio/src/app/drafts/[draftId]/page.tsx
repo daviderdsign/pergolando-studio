@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { getDraft } from "@/lib/storage";
+import { getDraft, listDrafts } from "@/lib/storage";
+import { summarizeDrafts } from "@/lib/draft-progress";
 import { DraftEditor } from "@/components/DraftEditor";
 
 interface Props {
@@ -11,5 +12,8 @@ export default async function DraftPage({ params }: Props) {
   const draft = await getDraft(draftId);
   if (!draft) notFound();
 
-  return <DraftEditor initialDraft={draft} />;
+  const allDrafts = await listDrafts();
+  const projects = await summarizeDrafts(allDrafts);
+
+  return <DraftEditor initialDraft={draft} projects={projects} />;
 }
