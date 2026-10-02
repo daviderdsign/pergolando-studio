@@ -188,12 +188,9 @@ export function DraftEditor({ initialDraft, projects }: Props) {
     : undefined;
 
   return (
-    <StudioShell heroImageUrl={heroImageUrl}>
+    <StudioShell heroImageUrl={heroImageUrl} backHref="/">
       <ProjectRow items={projects} currentId={draft.id} />
 
-      <p>
-        <a href="/">&larr; Progetti</a>
-      </p>
       <h1>{draft.nomeAzienda}</h1>
       <p className="muted">tenant: {draft.tenantId}</p>
 

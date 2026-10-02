@@ -35,11 +35,11 @@ export function NewDraftForm() {
   return (
     <form onSubmit={handleSubmit} className="new-draft-form">
       <label>
-        Tenant id
+        Nome progetto
         <input
           value={tenantId}
           onChange={(e) => setTenantId(e.target.value.trim())}
-          placeholder="es. rossi-pergole"
+          placeholder="es. Pergole Rossi"
           required
         />
       </label>
@@ -61,7 +61,7 @@ export function NewDraftForm() {
         </select>
       </label>
       <button type="submit" disabled={submitting}>
-        {submitting ? "Creazione…" : "Crea bozza"}
+        {submitting ? "Creazione…" : "Crea progetto"}
       </button>
       {error && <p className="error">{error}</p>}
     </form>

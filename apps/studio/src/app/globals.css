@@ -49,6 +49,12 @@
   --space-5: 24px;
   --space-6: 32px;
   --space-7: 48px;
+
+  /* Fluid page gutter — the content well follows the viewport width instead
+     of capping out at a fixed max-width, staying ~90px from each edge on
+     large screens (see the reference mockups). Narrowed on small screens
+     below. */
+  --content-pad-x: 90px;
 }
 
 * {
@@ -86,34 +92,41 @@ h1 {
 
 .studio-header {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
-  padding: var(--space-4) var(--space-6);
+  padding: var(--space-4) var(--content-pad-x);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
 }
 
-.studio-header-logo {
+.studio-header-back {
+  font-weight: var(--fw-bold);
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.studio-header-mark {
   display: inline-block;
-  height: 18px;
+  height: 22px;
   color: var(--color-text);
 }
 
 .studio-content {
-  max-width: 1040px;
-  margin: 0 auto;
-  padding: var(--space-6) var(--space-6) var(--space-7);
+  padding: var(--space-6) var(--content-pad-x) calc(var(--space-7) * 2);
 }
 
 .studio-hero {
-  height: 320px;
+  height: 440px;
   background: var(--color-surface-dark) center / cover no-repeat;
 }
 
 .studio-footer {
   display: flex;
   align-items: center;
-  padding: var(--space-5) var(--space-6);
+  justify-content: space-between;
+  padding: var(--space-5) var(--content-pad-x);
   background: var(--color-surface-dark);
 }
 
@@ -123,41 +136,57 @@ h1 {
   color: #ffffff;
 }
 
-.studio-header-logo svg,
-.studio-footer-logo svg {
+.studio-footer-mark {
+  display: inline-block;
+  height: 22px;
+  color: #ffffff;
+}
+
+.studio-header-mark svg,
+.studio-footer-logo svg,
+.studio-footer-mark svg {
   display: block;
   height: 100%;
   width: auto;
 }
 
-/* ---- Project row (dashboard + detail page) ---- */
+/* ---- Project row (dashboard + detail page) ----
+   A fixed-size grey card on the left and a fixed-size grid on the right —
+   neither one grows with the viewport; only the gap between them does
+   (justify-content: space-between on the row, flex-grow: 0 on both). */
 
 .project-row {
   display: flex;
   flex-wrap: wrap;
+  justify-content: space-between;
   align-items: stretch;
-  gap: var(--space-6);
+  gap: var(--space-7);
   padding-bottom: var(--space-6);
   margin-bottom: var(--space-6);
   border-bottom: 1px solid var(--color-border);
 }
 
-.project-card {
+.project-brand-card {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  flex: 0 1 340px;
   gap: var(--space-4);
-  min-width: 220px;
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-5);
   background: var(--color-surface);
   border-radius: 10px;
 }
 
-.project-card-kicker {
-  font-size: 0.7rem;
-  font-weight: var(--fw-bold);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+.project-brand-card-logo {
+  display: inline-block;
+  height: 28px;
+  color: var(--color-text);
+}
+
+.project-brand-card-logo svg {
+  display: block;
+  height: 100%;
+  width: auto;
 }
 
 .project-card-body {
@@ -182,7 +211,14 @@ h1 {
   font-weight: var(--fw-bold);
 }
 
-.project-row-item {
+.project-grid {
+  flex: 0 1 560px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6) var(--space-6);
+}
+
+.project-grid-item {
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -191,26 +227,28 @@ h1 {
   text-decoration: none;
 }
 
-.project-row-name {
+.project-grid-logo {
+  max-height: 1.5rem;
+  max-width: 8rem;
+  object-fit: contain;
+  object-position: left;
+}
+
+.project-grid-name {
   font-weight: var(--fw-bold);
 }
 
-.project-row-progress {
+.project-grid-progress {
   font-size: 0.85rem;
   font-weight: var(--fw-light);
   color: var(--color-muted);
 }
 
-.project-row-new {
-  display: flex;
-  align-items: center;
-  margin-left: auto;
+.project-grid-new {
   font-weight: var(--fw-bold);
-  color: var(--color-text);
-  text-decoration: none;
 }
 
-.project-row-new:hover {
+.project-grid-item:hover {
   text-decoration: underline;
 }
 
@@ -491,9 +529,20 @@ input[type="file"]::file-selector-button {
 
 /* ---- Responsive ---- */
 
+@media (max-width: 1200px) {
+  :root {
+    --content-pad-x: 48px;
+  }
+}
+
 @media (max-width: 768px) {
+  :root {
+    --content-pad-x: 20px;
+  }
+
   .studio-content {
-    padding: var(--space-5) var(--space-4) var(--space-6);
+    padding-top: var(--space-5);
+    padding-bottom: var(--space-6);
   }
 
   .project-row {
@@ -501,8 +550,8 @@ input[type="file"]::file-selector-button {
     align-items: stretch;
   }
 
-  .project-row-new {
-    margin-left: 0;
+  .project-grid {
+    grid-template-columns: 1fr;
   }
 
   .editor-grid {
