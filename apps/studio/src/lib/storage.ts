@@ -45,6 +45,8 @@ export interface Draft {
   logoFileName?: string;
   /** Product photos/renderings (STU placeholder in the shared schema, populated by Studio). */
   assets?: AssetManifestEntry[];
+  /** Manual override for the dashboard progress %, for demo/example projects where the auto-computed heuristic doesn't apply — see draft-progress.ts. */
+  progressOverride?: number;
 }
 
 export interface TableCandidate {

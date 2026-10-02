@@ -23,6 +23,8 @@ function hasMappatura(database: unknown): boolean {
  * (il risultato della validazione non è persistito sul Draft).
  */
 export async function draftProgress(draft: Draft): Promise<number> {
+  if (draft.progressOverride !== undefined) return draft.progressOverride;
+
   let score = 0;
   if (draft.extractedText) score += WEIGHTS.catalogoPdf;
   if (hasMappatura(draft.database)) score += WEIGHTS.mappatura;
