@@ -28,13 +28,29 @@ services:
       # Local HTTP only — production behind Cloudflare Tunnel terminates TLS
       # and should run with this unset (defaults to secure cookies).
       SESSION_COOKIE_SECURE: "false"
+      # The 3D render feature (pipeline step 4) is optional — omit this and
+      # the endpoint just responds 503 instead of failing startup.
+      BLENDER_SERVICE_URL: "http://blender:8080"
     volumes:
       - ./apps/studio/storage/bundles/brera-demo/0.1.0:/app/bundle:ro
       - backend_data:/app/data
+    depends_on:
+      - blender
     # See deploy/nas/docker-compose.yml for why this calls the prisma
     # binary directly instead of `pnpm exec prisma` (the latter crash-loops
     # the container — confirmed on the NAS deploy).
     command: sh -c "node_modules/.bin/prisma migrate deploy && node dist/main.js"
+
+  # Isolated on purpose (see pergolando-blender-service/Dockerfile and
+  # 3d/NOTES.md): Blender is a ~300MB dependency that only this container
+  # needs, kept out of the backend's own image entirely. Mounts this repo's
+  # 3d/ folder read-only, same pattern as the backend's bundle mount above —
+  # a script/model tweak doesn't need an image rebuild.
+  blender:
+    build:
+      context: ./pergolando-blender-service
+    volumes:
+      - ./3d:/app/3d:ro
 
   frontend:
     build:
