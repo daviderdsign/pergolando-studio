@@ -1,0 +1,7 @@
+torch
+torchvision
+opencv-python
+numpy
+scipy
+kornia
+git+https://github.com/cvg/GeoCalib#egg=geocalib
