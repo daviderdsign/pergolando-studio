@@ -318,7 +318,7 @@ def rail_transform_verts(obj, rail, delta_x_cm=0.0, extend=True):
     obj.data.update()
 
 
-def build_montante(L_cm, H_cm, delta_z_cm):
+def build_montante(L_cm, H_cm, delta_z_cm, n_guide=2):
     montante = bpy.data.objects["Montante"]
     verts = montante.data.vertices
 
@@ -332,6 +332,19 @@ def build_montante(L_cm, H_cm, delta_z_cm):
     montante.data.update()
 
     mirror_x_copy(montante, "Montante.001")
+
+    # A guide spanning more than the two edges needs its own vertical
+    # support underneath, same as the edge ones (Davide, 2026-10-04) — the
+    # earlier assumption that Trave alone was enough span support was
+    # wrong. Reuses the already-positioned edge Montante as a template,
+    # translated along X only (same technique as the intermediate
+    # Guida/Supporto copies) — correct height/depth, just moved into place.
+    prefix = "Montante_intermedio_"
+    _remove_stale_copies(prefix)
+    targets = guide_x_targets(L_cm, n_guide)
+    for i, target_x in enumerate(targets[1:-1], start=1):
+        _translate_x_copy(montante, f"{prefix}{i}", target_x)
+
     return montante
 
 
@@ -608,7 +621,7 @@ def build_pergola(L_cm, P_cm, H_cm, delta_h_cm, fissaggio, n_guide=2):
 
     rail = compute_rail(H_cm, delta_h_cm, P_cm)
 
-    build_montante(L_cm, H_cm, delta_z_cm)
+    build_montante(L_cm, H_cm, delta_z_cm, n_guide)
     build_trave(L_cm, H_cm, delta_z_cm)
     build_montante_posteriore(delta_x_cm, rail)
     build_trave_posteriore(L_cm, delta_x_cm, rail)
@@ -625,6 +638,36 @@ def build_pergola(L_cm, P_cm, H_cm, delta_h_cm, fissaggio, n_guide=2):
 
     bpy.context.view_layer.update()
     return {"n_frangitratta_intermedi": n_intermedi}
+
+
+def apply_visual_offset(offset_x_cm=0.0, offset_z_cm=0.0):
+    """Rigid world-space nudge of the ENTIRE already-built pergola — added
+    2026-10-04 so the wizard can let a seller fine-tune a render's on-photo
+    fit (small calibration mismatches: "position was right but it reads a
+    bit too far left/forward") WITHOUT touching the real quote dimensions
+    (L_cm/P_cm/H_cm stay exactly what the customer configured; only this
+    render gets nudged). Deliberately NOT exposed as a quote field — see
+    RenderScene3dDto's doc.
+
+    Every object in this file shares the exact same rotation_euler/scale/
+    location (BASE_ROT, 0.01, origin — confirmed empirically), so a uniform
+    LOCAL vertex delta is already a uniform WORLD delta, no per-object
+    transform math needed. Local-space convention throughout this script
+    (see rail_transform_verts etc.): X=width, Y=height, Z=depth — so
+    offset_x_cm is left/right, offset_z_cm is forward/back. Height is
+    deliberately NOT offered here: "lower it" means override H_cm itself
+    (every leg still reaches exactly to world Y=0, the real ground) rather
+    than floating/sinking the whole rigid body, which a Y offset would do.
+    """
+    if offset_x_cm == 0.0 and offset_z_cm == 0.0:
+        return
+    for obj in bpy.context.view_layer.objects:
+        if obj.type != "MESH" or not obj.visible_get():
+            continue
+        for v in obj.data.vertices:
+            v.co.x += offset_x_cm
+            v.co.z += offset_z_cm
+        obj.data.update()
 
 
 # ---------------------------------------------------------------------------
@@ -1003,11 +1046,135 @@ def render_freestyle(output_path):
     bpy.ops.render.render(write_still=True)
 
 
+# Which pieces feed each of the two partial line-art references (2026-10-04,
+# Davide's exact split): "montanti" = Montante/.001 (front legs) +
+# Montante_Posteriore_Dx/Sx (rear legs) — all start with "Montante"; "travi"
+# = Trave (front beam) + Trave_Posteriore (rear beam) — both start with
+# "Trave" (this also matches "Trave_Laterale", but that piece is always
+# hidden/excluded — see hide_unfinished_accessories — so it never reaches
+# render_lineart_gp's visible-objects filter anyway); "guide" = Guida/.001
+# + any Guida_intermedio_N (multi-guide, see guide_x_targets) — all start
+# with "Guida". The roof split is simpler: every Frangitratta_* piece plus
+# Telo's own profile — deliberately NOT Tettuccio (not asked for).
+LINEART_STRUCTURE_PREFIXES = ("Montante", "Trave", "Guida")
+LINEART_ROOF_PREFIXES = ("Frangitratta", "Telo")
+
+
+def render_lineart_gp(output_path, object_filter=None, crease_deg=130.0, line_radius=0.008, samples=64):
+    """
+    Line-art via Grease Pencil's Line Art modifier — replaces the earlier
+    Freestyle+Holdout technique (render_freestyle above) for the ComfyUI
+    reference set, per Davide's explicit modifier settings (2026-10-04):
+    Crease ON (threshold ~120-140 deg), Silhouette/Contour ON, Material
+    Boundary OFF, Intersection ON (needed to see where Telo meets
+    Frangitratta instead of them merging into one outline), Loose OFF,
+    Overlapping Edges OFF, very thin lines (~1-2px) — and critically, NO
+    FILL: stroke-only output, none of Freestyle's "large flat shape" look.
+
+    `object_filter`: optional iterable of name PREFIXES — when given, only
+    source objects whose name starts with one of these prefixes feed the
+    Line Art modifier (used for structure_lineart.png/roof_lineart.png);
+    None (default) uses the whole visible scene, same coverage as the old
+    render_freestyle.
+
+    Two real Blender 5.2 quirks found making this work, neither documented
+    anywhere obvious, both confirmed by direct depsgraph inspection:
+    - The LINEART modifier's target_layer/target_material are BOTH empty
+      by default and silently produce zero strokes until explicitly
+      pointed at a real GP layer/material that already exists on the GP
+      object the modifier lives on.
+    - hide_render=True on a source mesh ALSO produces zero strokes for it
+      — Line Art reads source geometry from the very depsgraph being
+      built for the render, and a hide_render object isn't evaluated into
+      it at all. Holdout materials (same trick render_freestyle already
+      used) keep objects "present" for Line Art to read while
+      contributing nothing to the final Combined image — this is why
+      every source object below gets a Holdout material instead of being
+      hidden, even though hiding would otherwise be simpler.
+    """
+    scene = bpy.context.scene
+    cam = scene.camera
+    if cam is None:
+        raise RuntimeError("render_lineart_gp requires a camera to already be set")
+
+    vl = bpy.context.view_layer
+    visible_meshes = [o for o in vl.objects if o.type == "MESH" and o.visible_get()]
+    if object_filter is not None:
+        source_objs = [o for o in visible_meshes if any(o.name.startswith(p) for p in object_filter)]
+        if not source_objs:
+            raise RuntimeError(f"render_lineart_gp: object_filter {object_filter!r} matched no visible mesh objects")
+    else:
+        source_objs = visible_meshes
+
+    holdout_mat = bpy.data.materials.new("PergolandoLineArtHoldout")
+    holdout_mat.use_nodes = True
+    nt = holdout_mat.node_tree
+    nt.nodes.clear()
+    holdout_node = nt.nodes.new("ShaderNodeHoldout")
+    output_node = nt.nodes.new("ShaderNodeOutputMaterial")
+    nt.links.new(holdout_node.outputs[0], output_node.inputs["Surface"])
+    for obj in source_objs:
+        if obj.data.materials:
+            for i in range(len(obj.data.materials)):
+                obj.data.materials[i] = holdout_mat
+        else:
+            obj.data.materials.append(holdout_mat)
+
+    if object_filter is not None:
+        # The LINEART modifier's source_type='COLLECTION' is what supports
+        # an arbitrary object SUBSET ('OBJECT' only takes a single object)
+        # — build a throwaway collection just for this filtered set. An
+        # object can belong to more than one collection at once, so this
+        # doesn't disturb the scene's real collection structure. Every
+        # OTHER mesh must be fully hidden from render too, or it'd show
+        # through as a plain (un-outlined) silhouette.
+        source_collection = bpy.data.collections.new("PergolandoLineArtSource_tmp")
+        bpy.context.scene.collection.children.link(source_collection)
+        for obj in source_objs:
+            source_collection.objects.link(obj)
+        excluded = set(source_objs)
+        for obj in visible_meshes:
+            if obj not in excluded:
+                obj.hide_render = True
+    else:
+        source_collection = bpy.context.scene.collection
+
+    bpy.ops.object.grease_pencil_add(type="EMPTY")
+    gp_obj = bpy.context.active_object
+    gp_obj.name = "PergolandoLineArt"
+    mod = gp_obj.modifiers.new("LineArt", type="LINEART")
+    mod.source_type = "COLLECTION"
+    mod.source_collection = source_collection
+    mod.use_crease = True
+    mod.crease_threshold = math.radians(crease_deg)
+    mod.use_contour = True
+    mod.use_material = False
+    mod.use_intersection = True
+    mod.use_loose = False
+    mod.use_edge_overlap = False
+    mod.radius = line_radius
+
+    gp_mat = gp_obj.data.materials[0]
+    mod.target_layer = gp_obj.data.layers[0].name
+    mod.target_material = gp_mat
+    gp_mat.grease_pencil.show_fill = False
+    gp_mat.grease_pencil.show_stroke = True
+    gp_mat.grease_pencil.color = (0.0, 0.0, 0.0, 1.0)
+
+    scene.render.engine = "BLENDER_EEVEE"
+    scene.eevee.taa_render_samples = samples
+    scene.render.film_transparent = True
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.image_settings.color_mode = "RGBA"
+    scene.render.filepath = output_path
+    bpy.ops.render.render(write_still=True)
+
+
 def render_colored(
     output_path,
     color_rgb,
     fissaggio,
-    resolution=(1600, 1200),
+    resolution=(2560, 1920),
     fabric_rgb=None,
     frangitratta_rgb=None,
     include_backdrop=True,
@@ -1041,15 +1208,17 @@ def render_colored(
     # Powder-coated aluminum, not raw/brushed metal: Metallic close to 1 so
     # it actually reflects its surroundings (a metal=0 diffuse "white
     # plastic" shader was exactly the "flat, no shading" look Davide
-    # flagged, 2026-09-30), Roughness kept fairly low (satin paint, not a
-    # mirror) — needs a varied environment to reflect (see HDRI below),
-    # not just a flat color, or it still reads as flat.
+    # flagged, 2026-09-30) — needs a varied environment to reflect (see
+    # HDRI below), not just a flat color, or it still reads as flat.
+    # Roughness lowered 0.3 -> 0.15 (2026-10-04, Davide, visual call: wants
+    # a noticeably more metallic/shiny look than the previous satin finish
+    # — not a final number, just a first pass to tune from).
     mat = bpy.data.materials.new("PergolandoColored")
     mat.use_nodes = True
     bsdf = next(n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
     bsdf.inputs["Base Color"].default_value = (*color_rgb, 1.0)
     bsdf.inputs["Metallic"].default_value = 0.9
-    bsdf.inputs["Roughness"].default_value = 0.3
+    bsdf.inputs["Roughness"].default_value = 0.15
 
     fabric_mat = None
     if fabric_rgb is not None:
@@ -1057,7 +1226,11 @@ def render_colored(
         fabric_mat.use_nodes = True
         fabric_bsdf = next(n for n in fabric_mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
         fabric_bsdf.inputs["Base Color"].default_value = (*fabric_rgb, 1.0)
-        fabric_bsdf.inputs["Roughness"].default_value = 0.75
+        # Explicit Metallic=0 (Principled's own default, but spelled out so
+        # it can't drift later) + Roughness close to 1: fabric must read as
+        # a flat matte textile, no reflections at all (2026-10-04, Davide).
+        fabric_bsdf.inputs["Metallic"].default_value = 0.0
+        fabric_bsdf.inputs["Roughness"].default_value = 0.95
 
     # Frangitratta pieces are the real "parti in plastica" — confirmed by
     # the bundle's own catalog data, where colorePlastica's UI label is
@@ -1156,10 +1329,6 @@ def render_colored(
     world_output = nt.nodes.new("ShaderNodeOutputWorld")
     nt.links.new(bg_node.outputs["Background"], world_output.inputs["Surface"])
 
-    scene.render.engine = "CYCLES"
-    scene.cycles.samples = 128
-    scene.cycles.use_denoising = True
-
     # If the caller already set up a camera (e.g. setup_camera_from_pnp, to
     # match this same shot's line art/depth/mask renders exactly), use it
     # as-is — resolution included — instead of this function's own default
@@ -1181,6 +1350,23 @@ def render_colored(
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGBA"
     scene.render.film_transparent = True
+
+    # EEVEE (2026-10-04, measured on the real test_02 camera/scene): ~5s vs
+    # Cycles' ~27s at 128 samples, visually equivalent for this preview's
+    # purpose — `use_raytracing` gives the metallic material real
+    # reflections instead of falling back to flat screen-space ones. Note:
+    # when include_backdrop=True, the floor/wall's `is_shadow_catcher` flag
+    # (set above) has NO effect under EEVEE — confirmed empirically it
+    # renders as a plain opaque plane instead of "transparent except where a
+    # shadow falls". Harmless today (nothing calls render_colored with
+    # include_backdrop=True — see 3d/NOTES.md), but if that path gets reused
+    # later, it needs either a real fix or to stay on Cycles for that case.
+    # A working two-pass EEVEE+Cycles hybrid (pergola on EEVEE, shadow-only
+    # pass on Cycles via Holdout, composited through Blender's own
+    # compositor) was prototyped and confirmed working 2026-10-04, then
+    # shelved on Davide's call — not worth the complexity while unused.
+    scene.render.engine = "BLENDER_EEVEE"
+    scene.eevee.use_raytracing = True
     scene.render.filepath = output_path
     bpy.ops.render.render(write_still=True)
 
@@ -1279,8 +1465,11 @@ def render_material_id(output_path):
         else:
             obj.data.materials.append(piece_mat)
 
-    scene.render.engine = "CYCLES"
-    scene.cycles.samples = 16  # flat emission colors, no noise to resolve
+    # EEVEE instead of Cycles (2026-10-04, Davide flagged real render times):
+    # flat Emission colors need zero path-traced lighting to resolve — EEVEE
+    # renders this instantly, Cycles was only ever noise-free here because
+    # samples was already capped low, not because it needed ray tracing.
+    scene.render.engine = "BLENDER_EEVEE"
     scene.render.film_transparent = True
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGBA"
@@ -1315,6 +1504,7 @@ def main():
         fissaggio=cfg.get("fissaggio", "autoportante"),
         n_guide=n_guide,
     )
+    apply_visual_offset(cfg.get("offsetXCm", 0.0), cfg.get("offsetZCm", 0.0))
 
     output_mode = cfg.get("outputMode", "silhouette")
 
@@ -1452,8 +1642,8 @@ def main():
         direction = center - cam_obj.location
         cam_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
         bpy.context.scene.camera = cam_obj
-        bpy.context.scene.render.resolution_x = 1280
-        bpy.context.scene.render.resolution_y = 960
+        bpy.context.scene.render.resolution_x = 2560
+        bpy.context.scene.render.resolution_y = 1920
 
         # These renders exist purely to hand Gemini unambiguous geometry
         # (this function's own docstring: "not meant to look good, just
@@ -1478,6 +1668,12 @@ def main():
         render_depth_map(args.output)
     elif output_mode == "freestyle":
         render_freestyle(args.output)
+    elif output_mode == "lineart":
+        render_lineart_gp(args.output)
+    elif output_mode == "lineart_structure":
+        render_lineart_gp(args.output, object_filter=LINEART_STRUCTURE_PREFIXES)
+    elif output_mode == "lineart_roof":
+        render_lineart_gp(args.output, object_filter=LINEART_ROOF_PREFIXES)
     elif output_mode == "mask":
         render_mask(args.output)
     elif output_mode == "material_id":

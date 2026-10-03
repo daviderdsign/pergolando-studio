@@ -8,14 +8,27 @@ file to disk. This script is what actually produces the fixed-name set
 Davide asked for (session of 2026-09-30, confirmed again 2026-10-03):
 
     01_original.jpg   - the real site photo, copied in as-is
-    02_lineart.png     - Freestyle line art (render_freestyle)
+    02_lineart.png     - Grease Pencil Line Art (render_lineart_gp)
     03_depth.png        - depth map (render_depth_map)
     04_mask.png          - inpainting alpha mask (render_mask)
-    05_beauty.png         - full-color "beauty" render (render_colored)
-    06_material_id.png     - flat per-material-category pass (render_material_id)
-                              (added 2026-10-03, after the original 5-name
-                              set was agreed — kept numbered 06 to extend it
-                              rather than renumber everything else)
+    05_material_id.png    - flat per-material-category pass (render_material_id)
+    structure_lineart.png  - partial line art: montanti+travi+guide only
+    roof_lineart.png         - partial line art: frangitratta+telo only
+                              (both added 2026-10-04, Davide's own names —
+                              no number prefix, unlike 01-05 above)
+
+`02_lineart.png` switched from Blender's Freestyle renderer to a Grease
+Pencil + Line Art modifier setup (2026-10-04, Davide's exact settings:
+crease ~130deg, contour on, material boundary off, intersection on, loose
+off, overlapping edges off, thin ~1-2px strokes, no fill) — render_freestyle
+still exists in generate_flag.py (still used by the ortho_* elevation
+views) but is no longer what this script calls for the lineart entries.
+
+The "beauty" full-color render (render_colored) used to be exported too, as
+05_beauty.png, with material_id bumped to 06 — dropped on request
+(2026-10-04, not needed for this set) and material_id moved back down to
+05. render_colored itself is untouched in generate_flag.py; this script
+just no longer calls it.
 
 Runs OUTSIDE Blender (plain Python + Pillow — this process just shells out
 to Blender once per mode, same `--background --factory-startup flag.blend
@@ -60,10 +73,12 @@ BLENDER_EXE_ENV = "BLENDER_EXECUTABLE_PATH"
 BLENDER_EXE_FALLBACK_WIN = r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
 
 MODES = [
-    ("02_lineart.png", "freestyle"),
+    ("02_lineart.png", "lineart"),
     ("03_depth.png", "depth"),
     ("04_mask.png", "mask"),
-    ("06_material_id.png", "material_id"),
+    ("05_material_id.png", "material_id"),
+    ("structure_lineart.png", "lineart_structure"),
+    ("roof_lineart.png", "lineart_roof"),
 ]
 
 
@@ -120,7 +135,13 @@ def main():
     parser.add_argument("--generate-script", default=str(GENERATE_SCRIPT_DEFAULT))
     args = parser.parse_args()
 
-    output_dir = Path(args.output_dir)
+    # Resolved to an ABSOLUTE path before ever reaching Blender: a relative
+    # --output path reaches Blender's own scene.render.filepath, which (found
+    # 2026-10-04) resolves relative paths against something other than this
+    # process's cwd on Windows (a run with --output-dir "3d/test_photos/..."
+    # landed at "C:\3d\test_photos\...", nowhere near the actual repo) — only
+    # PIL's own file I/O (the 01_original.jpg copy) respected cwd correctly.
+    output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     with open(args.config, "r", encoding="utf-8") as f:
@@ -131,11 +152,9 @@ def main():
         with open(args.camera, "r", encoding="utf-8") as f:
             camera_cfg = json.load(f)
 
-    # A real photo to match means no synthetic floor/wall for the beauty
-    # pass (the photo already provides one) — same rule Scene3dService
-    # applies for the wizard's own photo-overlay preview.
-    has_photo = args.original_photo is not None
     blender_exe = resolve_blender_exe(args.blender_exe)
+    flag_blend = str(Path(args.flag_blend).resolve())
+    generate_script = str(Path(args.generate_script).resolve())
 
     produced = []
 
@@ -149,21 +168,9 @@ def main():
         if camera_cfg:
             config["camera"] = camera_cfg
         out_path = output_dir / filename
-        run_blender(blender_exe, args.flag_blend, args.generate_script, config, out_path)
+        run_blender(blender_exe, flag_blend, generate_script, config, out_path)
         produced.append(out_path)
         print(f"  {filename}")
-
-    beauty_config = {
-        **base_config,
-        "outputMode": "colored",
-        "includeBackdrop": not has_photo,
-    }
-    if camera_cfg:
-        beauty_config["camera"] = camera_cfg
-    beauty_path = output_dir / "05_beauty.png"
-    run_blender(blender_exe, args.flag_blend, args.generate_script, beauty_config, beauty_path)
-    produced.append(beauty_path)
-    print("  05_beauty.png")
 
     print(f"\n{len(produced)} file in {output_dir}")
 
