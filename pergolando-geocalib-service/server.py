@@ -24,6 +24,7 @@ full history.
 """
 
 import base64
+import io
 import json
 import math
 import os
@@ -34,6 +35,7 @@ import cv2
 import numpy as np
 import torch
 from geocalib import GeoCalib
+from PIL import Image, ImageOps
 
 from resection import ResectionError, project, resect_points, rotmat
 
@@ -71,9 +73,35 @@ def calibrate_placement(payload):
     h_cm = float(payload["altezzaCm"])
 
     image_bytes = base64.b64decode(foto_b64)
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
-        f.write(image_bytes)
-        tmp_path = f.name
+
+    # Downscale before handing the image to GeoCalib — a real phone photo
+    # (e.g. 4096x3072, 12.6MP) makes GeoCalib's own internal preprocessing
+    # (kornia's anti-alias gaussian blur before resize) allocate a buffer
+    # proportional to the INPUT resolution, not its target working size —
+    # ~384MB for a single intermediate on a 12.6MP image, which exhausted
+    # available memory. Reproduced standalone outside the server as a clean
+    # `RuntimeError: not enough memory` from kornia/torch's CPU allocator;
+    # inside the long-running threaded server the same condition instead
+    # surfaced as a native access violation (process death, no Python
+    # traceback at all) — found 2026-10-03 testing against a real phone
+    # photo for the first time (every earlier test used small, pre-shrunk
+    # test images). Camera calibration itself needs no fine detail, so
+    # resizing first is strictly a fix, not a quality tradeoff; `punti` are
+    # normalized (xNorm/yNorm) and `fx/fy/cx/cy` are computed from whatever
+    # size we actually load, so everything downstream (resection, the
+    # reprojected tettoNormalizzato) stays self-consistent regardless of
+    # which resolution this ends up being.
+    MAX_DIMENSION_PX = 1600
+    with Image.open(io.BytesIO(image_bytes)) as pil_image:
+        pil_image = ImageOps.exif_transpose(pil_image)
+        pil_image = pil_image.convert("RGB")
+        if max(pil_image.size) > MAX_DIMENSION_PX:
+            scale = MAX_DIMENSION_PX / max(pil_image.size)
+            new_size = (round(pil_image.width * scale), round(pil_image.height * scale))
+            pil_image = pil_image.resize(new_size, Image.LANCZOS)
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            pil_image.save(f, format="JPEG", quality=92)
+            tmp_path = f.name
 
     try:
         model = get_model()

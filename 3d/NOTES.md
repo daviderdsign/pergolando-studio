@@ -209,7 +209,7 @@ sopra, ancora attuale per quelli non ancora migrati)
 | `Telo` | rimappaggio proporzionale: fit lineare `local_y = a*local_z+b` sui dati originali, poi per ogni vertice si preserva il **residuo** rispetto alla retta e si ricalcola sulla nuova retta/nuova estensione — per non perdere le pieghe/dettagli del telo originale | Deve restare **sotto la guida**, nello spazio tra guida e frangitratta (offset negativo rispetto alla retta guida, non sopra) |
 | `Aggancio_Parete` / `.002` | bracket per variante a parete; stessa logica di shift di `Trave_Posteriore` (X, altezza, profondità) | Sostituita almeno una volta con mesh più dettagliata da `aggancio_parete.fbx` — solo riposizionamento, nessuna logica nuova |
 | `Timpano` + `Trave_Laterale` | pannello di chiusura laterale opzionale (solo se la pergola è "chiusa"); il bordo superiore deve restare parallelo alla guida | **Tecnica corretta** (validata da Davide): NON forzare ogni vertice sulla retta della guida (appiattisce lo spessore/profilo alluminio) — invece **traslare rigidamente l'intero gruppo di vertici superiori di un'estremità** (es. l'angolo fronte) lungo l'asse Z, mantenendo fissa l'altra estremità, fino a far coincidere la distanza dal bordo guida **nei due vertici più esterni** (fronte e retro), non nella media del gruppo |
-| `Pilastrino_intermedio`, `Skipper` | introdotti in `flag4.fbx`, **non ancora spiegati/lavorati** | Tenuti nascosti in scena, in attesa |
+| `Pilastrino_intermedio`, `Skipper` | introdotti in `flag4.fbx`; **chiarito 2026-10-03**: entrambi allo stesso spigolo di `Montante`/`Guida` (non al centro) — quasi certamente geometria del prodotto "Skipper" (non incluso in questo bundle) rimasta mescolata nell'FBX | Tenuti nascosti in scena |
 
 ## Pendenza reale della guida (da ricalcolare sempre, mai assumere)
 
@@ -633,6 +633,177 @@ render diretto, nessun grafo compositor custom — esattamente l'Alpha pass dell
 niente altro. Verificato: alpha extrema (0,255), sagoma pixel-esatta confrontata su sfondo
 magenta di prova.
 
+### Crash di `pergolando-geocalib-service` su foto reale ad alta risoluzione (2026-10-03)
+
+Primo vero test con una foto scattata da telefono (4096×3072, 12,6MP — `3d/test_photos/
+test_02/sfondo.jpg`), tramite il wizard reale (non più uno script one-shot): il servizio
+**crashava con un'access violation nativa** (`exit code 3221225477` = `0xC0000005`),
+nessun traceback Python, il processo moriva e basta — tutti i test precedenti avevano
+usato foto piccole (640×480), mai una vera foto da fotocamera.
+
+**Causa reale, riprodotta fuori dal server** (`test_crash_repro.py`, poi cancellato):
+il preprocessing interno di GeoCalib (kornia, `gaussian_blur2d` prima del resize — un
+anti-aliasing filter) alloca un buffer proporzionale alla risoluzione di **input**, non a
+quella target — su un'immagine da 12,6MP, ~384MB per un singolo tensore intermedio.
+Fuori dal server questo dà un pulito `RuntimeError: not enough memory`; **dentro il
+server HTTP persistente la stessa condizione di memoria esaurita si manifesta come
+access violation nativa** (probabilmente per via della memoria già impegnata dal modello
+caricato una volta sola all'avvio + più thread, più frammentazione — non indagato oltre,
+non necessario avendo trovato la causa a monte).
+
+**Fix**: `calibrate_placement` ora ridimensiona l'immagine (PIL, lato massimo 1600px,
+preservando l'aspect ratio) **prima** di passarla a GeoCalib — la calibrazione camera non
+ha bisogno di dettaglio fine. Bonus nello stesso punto di codice: `ImageOps.exif_transpose`
+per correggere l'orientamento di foto scattate in verticale da telefono (l'orientamento
+Exif non applicato ai pixel grezzi avrebbe rotto la stima di gravità in modo silenzioso —
+non ancora capitato con una foto reale, ma un rischio concreto ora che il flusso riceve
+foto vere da telefono, quindi corretto preventivamente). `punti` restano normalizzati
+(xNorm/yNorm) quindi tutto il resto (resection, `tettoNormalizzato`) resta coerente
+qualunque sia la risoluzione effettivamente caricata — verificato: lo stesso script di
+riproduzione, identico payload, ora restituisce una posa valida invece di crashare.
+
+### Crash di Blender su chiamate ripetute reali — addon di terze parti + processo zombie (2026-10-03)
+
+Stesso test dal vivo: dopo il fix del crash GeoCalib, il passo successivo (render 3D)
+falliva con "bad allocation" durante il caricamento della config OpenColorIO, oppure
+restava bloccato. Causa reale, in due parti:
+1. Un vecchio processo Blender rimasto **zombie** da un crash precedente (verificato via
+   PowerShell, poi terminato con `Stop-Process`) — occupava memoria/lock inutilmente.
+2. **Ogni singola invocazione** headless caricava comunque gli addon utente installati
+   su questa macchina: `bonsai` (incompatibile con la versione Python di questo Blender,
+   errore ad ogni avvio) e `BlenderKit` (lancia un proprio processo client in background
+   ad ogni avvio) — overhead reale e non necessario per un rendering headless scriptato.
+
+**Fix**: aggiunto `--factory-startup` agli argomenti CLI in
+`pergolando-blender-service/server.js` (subito dopo `--background`) — salta il
+caricamento di userpref/addon di terze parti, lasciando solo gli addon core. Verificato:
+chiamate ripetute ora stabili, nessun processo Blender residuo dopo la risposta HTTP.
+
+### deltaH (H1) mai realmente inviato al render (2026-10-03)
+
+Davide ha selezionato Δh=80 nel wizard reale, ma il render mostrava visivamente qualcosa
+più vicino a 60 e basta — non un errore di percezione: `wizard/page.tsx` calcolava un
+`deltaHCmStimato` (una stima segnaposto, 12% della sporgenza, già documentata come tale
+in un commento preesistente nel codice) e lo usava al posto del vero campo H1 raccolto
+dal form (`altezzaInclinazione`), sia per `/catalog/render3d` che per `/catalog/
+render-finale`. **Fix**: entrambe le chiamate ora inviano `deltaHCm: Number(altezzaInclinazione)`
+— il valore reale scelto dal venditore, non più una stima.
+
+### Colore selezionato dal venditore non applicato al render 3D (2026-10-03)
+
+Davide aveva selezionato bianco, il render mostrava un grigio scuro uniforme: il modello
+3D non riceveva **nessuna** informazione di colore — ogni chiamata a `/catalog/render3d`
+girava sempre nella modalità "silhouette" grigia di debug, indipendentemente da cosa
+l'utente avesse scelto nel catalogo.
+
+**Fix** (frontend → DTO → service → Blender):
+- `wizard/page.tsx`: aggiunte `coloreStruttura`/`colorePlastica` al body POST di
+  `/catalog/render3d` (le stringhe catalogo già disponibili, es. "RAL 9016 Bianco").
+- `render-scene3d.dto.ts`: due nuovi campi opzionali `@IsString()`, con nota che restano
+  `undefined` per le viste isolate di riferimento di `render-finale` (che devono restare
+  grigie neutre — Gemini riceve il colore via prompt testuale, non via immagine).
+- `scene3d.service.ts`: nuova `RAL_COLORS` (tabella RGB approssimata, solo i codici che
+  compaiono davvero nel catalogo bundle `Flag`, letto da `catalog/database.json`) +
+  `colorStringToRgb()` (regex sul codice RAL a 4 cifre, poi match per nome "antracite",
+  poi grigio neutro di fallback) — passati a `generate_flag.py` come `outputMode:
+  'colored'`, `colorRgb`, `frangitrattaRgb` (quest'ultimo per le parti in plastica/
+  Frangitratta — confermato dal campo `prodotto.colori.parti_plastiche.tag` = "Colore
+  frangitratta" nel catalogo reale, non un'ipotesi).
+- Bug collaterale trovato e corretto nello stesso punto: un commento JSDoc conteneva
+  `Flag/*/catalog/` — il `*/` letterale chiudeva il blocco di commento in anticipo,
+  causando una cascata di ~12 errori TypeScript nei file successivi. Risolto riformulando
+  il commento per evitare quella sottostringa.
+
+### Payload di `render-finale` troppo grande, nessuna traccia nei log backend (2026-10-03)
+
+Ultimo passo del test dal vivo: "Si è verificato un errore nella generazione dell'immagine
+finale. Riprova." — ma `preview_logs` sul backend non mostrava **nessuna** richiesta
+arrivata a `/catalog/render-finale` (solo la precedente `/catalog/render3d`, riuscita).
+Puntava a un fallimento lato client, prima che la richiesta partisse davvero.
+
+**Riprodotto isolatamente** (harness HTML servito via `python -m http.server`, foto reale
+`sfondo.jpg` 4096×3072 + overlay colorato): la vecchia `compositeImages` disegnava il
+composito alla risoluzione PIENA della foto originale e lo codificava **PNG** — risultato,
+un data URL da **~27MB**. Causa a monte confermata leggendo `pergolando-backend/src/
+main.ts`: `app.useBodyParser('json', { limit: '15mb' })` — il body totale (composito
+~27MB + `fotoAmbienteBase64` a piena risoluzione, altri ~4MB) superava il limite e veniva
+rifiutato silenziosamente prima di arrivare a qualunque punto che lo loggasse.
+
+**Fix** (`pergolando-frontend/src/lib/image-compose.ts`): stessa strategia già usata per
+GeoCalib — ridimensionare prima di codificare. Aggiunto `MAX_DIMENSION_PX = 1600` e una
+nuova `downscaleDataUrl()` esportata; `compositeImages` ora disegna a risoluzione limitata
+e codifica **JPEG qualità 0.9** invece di PNG a piena risoluzione (è sempre una foto
+appiattita, senza trasparenza da preservare). `wizard/page.tsx` → `handleGeneraFinale` usa
+`downscaleDataUrl(fotoAmbiente)` per `fotoAmbienteBase64`, in parallelo al composito.
+
+**Verificato**: stesso harness isolato, stessa foto reale — il payload totale scende da
+~27MB a **1.26MB**, ben sotto il limite di 15MB. `npm run typecheck` e `npm run lint` sul
+frontend entrambi puliti dopo il fix.
+
+### Multi-guida (2/3/4 guide) + export del set di immagini ComfyUI con nomenclatura fissa (2026-10-03)
+
+Due richieste dirette di Davide dopo il test dal vivo, affrontate insieme:
+
+**1) Nomenclatura fissa per il set di riferimento ComfyUI**, concordata il 2026-09-30 ma
+mai davvero collegata al codice: `01_original.jpg`, `02_lineart.png`, `03_depth.png`,
+`04_mask.png`, `05_beauty.png` (+ `06_material_id.png`, aggiunto dopo). Fino ad oggi
+`generate_flag.py` scriveva sempre su un path temporaneo casuale
+(`pergolando-blender-service/server.js`, `${randomUUID()}.png`) — nessun punto del sistema
+salvava mai questi file con un nome "parlante". **Nuovo script standalone**
+`3d/export_reference_set.py` (Python puro, gira FUORI da Blender — orchestratore via
+`subprocess`, stesso pattern di invocazione CLI di `pergolando-blender-service/server.js`:
+`--background --factory-startup flag.blend --python generate_flag.py -- --config-json ...
+--output ...`): dato un config JSON (stesso shape del generatore) + opzionalmente una foto
+reale e una camera (stesso shape PnP del wizard), produce l'intero set numerato in una
+cartella di output, con la stessa camera condivisa fra tutte le modalità così il set resta
+allineato pixel-per-pixel. Deliberatamente non collegato al flusso live del wizard/backend
+— è uno strumento offline per preparare i riferimenti ComfyUI, eseguibile da terminale.
+Verificato end-to-end con la foto reale `sfondo.jpg` e L=800 (3 guide): 6 file prodotti,
+nessun errore.
+
+**2) Multi-guida reale (2/3/4 guide)**: Davide aveva selezionato "Flag 3 guide" nel wizard
+(L=550, che però è già al limite della fascia 2 guide — vedi sotto) e il render ignorava
+comunque la scelta, generando sempre la variante a 2 guide — bug di wiring **and** gap di
+modellazione, risolti insieme:
+
+- **Dato reale di catalogo** (`apps/studio/storage/bundles/Flag/*/catalog/database.json`,
+  `sotto_modelli.flag.varianti_montaggio`): "2guide" copre L 200-550cm, "3guide" L
+  600-1100cm, "4guide" L 1150-1400cm (1400 è anche l'`L_max_modulo_cm` assoluto del
+  prodotto — **non esiste una variante "5 guide"** nel listino reale). I due intervalli
+  551-599 e 1101-1149 sono vuoti per davvero: il listino stesso non vende quelle larghezze
+  (`note_estrazione`).
+- **Nessun pezzo del modello rappresenta davvero una guida/pilastro centrale** — ipotesi
+  iniziale che `Pilastrino_intermedio` fosse quel pezzo, smentita (vedi sopra, sezione
+  "Rimasto in sospeso"): non esiste nell'FBX reverse-engineered un asset dedicato per
+  l'hardware delle guide intermedie. **Approccio adottato, esplicitamente un'approssimazione
+  non verificata contro l'hardware reale**: `Guida`/`Supporto` (i due pezzi che già
+  rappresentano una guida sui bordi) vengono duplicati per traslazione pura (non mirror —
+  nessuna ragione nota per assumere che una guida centrale sia "specchiata" come quella di
+  bordo) alle posizioni intermedie, evenly-spaced sull'intera larghezza: `n_guide=3` aggiunge
+  una guida al centro, `n_guide=4` aggiunge due guide ai punti a 1/4 e 3/4. Nessuna gamba
+  (`Montante`) o pilastro aggiuntivo per le guide centrali: `Trave`/`Telo` sono già pezzi
+  continui su tutta la L, e il listino prezza "Guida aggiuntiva" come accessorio a sé
+  (indicizzato solo per sporgenza), non come un set gamba+guida — coerente con l'assenza di
+  supporto verticale dedicato.
+- Nuove funzioni in `generate_flag.py`: `derive_n_guide_from_l(L_cm)` (soglie sopra,
+  arrotonda per eccesso nei due gap vuoti — più struttura, mai meno), `guide_x_targets(L_cm,
+  n_guide)`, `_translate_x_copy`/`_remove_stale_copies` (stesso pattern difensivo di
+  pulizia-e-ricostruzione già usato per i Frangitratta intermedi), `nGuide` opzionale nel
+  config (`cfg["nGuide"]`, altrimenti derivato da `L_cm`). **Verificato**: soglie corrette su
+  9 punti di L (200→1400), posizioni calcolate corrette, render reale a L=1300/n_guide=4
+  (4 guide visibili, telo diviso in 3 pannelli) e regressione a L=300/n_guide=2 di default
+  (identico all'architettura originale, nessuna guida intermedia spuria).
+- **Wiring reale** (il bug che Davide aveva effettivamente segnalato): il wizard raccoglie
+  già la scelta del venditore in `varianteKey` (`"2guide"`/`"3guide"`/`"4guide"`, le stesse
+  chiavi del catalogo) ma non la mandava mai a `/catalog/render3d`. Aggiunto
+  `varianteMontaggio` (stesso valore grezzo di catalogo, stesso pattern di
+  `coloreStruttura`/`colorePlastica`) a `RenderScene3dDto`, risolto in `Scene3dService` via
+  `varianteMontaggioToNGuide()` (regex `^(\d+)guide$` sulla chiave — il numero È già nella
+  chiave, nessuna tabella di lookup separata), passato come `nGuide` a
+  `pergolando-blender-service`. Propagato anche a `RenderFinaleService`'s tre viste isolate
+  per Gemini (prima sempre a 2 guide indipendentemente da cosa stesse configurando il
+  venditore).
+
 ## `pergolando-blender-service` — container isolato (Fase G)
 
 Blender **non** viene eseguito dentro `pergolando-backend`. È isolato in un proprio
@@ -737,12 +908,22 @@ Trave_Posteriore, Aggancio_Parete. **Verificato**:
   definitivamente chiuso; il fixture di test usato (`abs_position_render.png` + `1.jpg`
   nello scratchpad) ha la sagoma isolata in mezzo al prato, non contro un muro reale — va
   rifatto con una foto/sagoma coerenti per un giudizio pulito anche sul resto della scena.
-- `Pilastrino_intermedio` e `Skipper` (da `flag4.fbx`) — ancora da spiegare/lavorare.
+- ~~`Pilastrino_intermedio` e `Skipper` (da `flag4.fbx`) — ancora da spiegare/lavorare.~~
+  **chiarito 2026-10-03**: nessuno dei due è legato al numero di guide (vedi sezione
+  "Multi-guida" sotto) — entrambi hanno il proprio bounding box X nello stesso angolo di
+  `Montante`/`Guida`/`Supporto` (x≈139-150, lo spigolo di riferimento), non al centro.
+  Quasi certamente geometria del prodotto "Skipper" (pag. 18-29 del listino originale,
+  esplicitamente NON incluso in questo bundle — vedi `note_estrazione` in
+  `catalog/database.json`) rimasta mescolata nell'FBX comune. Restano nascosti in scena
+  come prima; non più considerati un mistero aperto.
 - `Timpano`/`Trave_Laterale` non sono ancora parametrizzati per L/P/H arbitrari — esclusi da
   ogni render finché non vengono generalizzati (probabile candidato per la stessa
   architettura a perno, non ancora provato).
-- Materiali/colori reali (colore struttura, colore plastica) non sono ancora applicati nel
-  render — oggi è tutto un unico materiale grigio di debug (modalità "silhouette").
+- ~~Materiali/colori reali (colore struttura, colore plastica) non sono ancora applicati nel
+  render — oggi è tutto un unico materiale grigio di debug (modalità "silhouette").~~
+  **risolto 2026-10-03**, vedi sezione dedicata sopra.
+- ~~**Modello 3D non supporta configurazioni a 3 guide/3 pilastri**~~ **risolto 2026-10-03**,
+  vedi sezione "Multi-guida (2/3/4 guide)" sotto.
 - Verificare davvero il build Docker di `pergolando-blender-service` (mai testato in questo
   ambiente — però verificato con successo direttamente sul NAS, vedi sezione dedicata sopra).
 - Pipeline downstream (compositing ControlNet vero, passo 6b) — solo l'immagine di

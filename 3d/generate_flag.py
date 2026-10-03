@@ -156,6 +156,80 @@ def _mesh_center_yz(obj):
     return (min(ys) + max(ys)) / 2, (min(zs) + max(zs)) / 2
 
 
+def _mesh_center_x(obj):
+    xs = [v.co.x for v in obj.data.vertices]
+    return (min(xs) + max(xs)) / 2
+
+
+def _translate_x_copy(src, dst_name, target_x_center):
+    """Plain (non-mirrored) duplicate of src's CURRENT mesh, shifted along
+    local X only, so it keeps src's own Y/Z (already rail-transformed) and
+    cross-section/orientation exactly — used for intermediate guides/
+    supports, which don't need src's handedness flipped (unlike the two
+    edge copies, see mirror_x_copy): there's no physical reason to assume a
+    middle rail is mirrored rather than just translated, and no reference
+    asset exists to check against (see guide_x_targets' docstring)."""
+    mesh_copy = src.data.copy()
+    delta_x = target_x_center - _mesh_center_x(src)
+    for v in mesh_copy.vertices:
+        v.co.x += delta_x
+    dst = bpy.data.objects.get(dst_name)
+    if dst is None:
+        dst = bpy.data.objects.new(dst_name, mesh_copy)
+        bpy.context.collection.objects.link(dst)
+    else:
+        dst.data = mesh_copy
+    dst.location = src.location
+    dst.rotation_euler = src.rotation_euler
+    dst.scale = src.scale
+    return dst
+
+
+def _remove_stale_copies(name_prefix):
+    i = 1
+    while True:
+        extra = bpy.data.objects.get(f"{name_prefix}{i}")
+        if extra is None:
+            break
+        bpy.data.objects.remove(extra, do_unlink=True)
+        i += 1
+
+
+# Real catalog thresholds (apps/studio/storage/bundles/Flag/*/catalog/
+# database.json, sotto_modelli.flag.varianti_montaggio): "2guide" up to
+# 550cm, "3guide" 600-1100cm, "4guide" 1150-1400cm (1400 is also this
+# product's absolute L_max_modulo_cm — there is no "5guide" tier in the
+# real price list). The 551-599 and 1101-1149 gaps are real: the vendor's
+# own price list doesn't sell those widths at all (see note_estrazione in
+# the same file) — rounded UP to the next tier here (more structure, never
+# less) since this is only a fallback for when the caller doesn't know/send
+# the real varianteMontaggio (see nGuide wiring in Scene3dService).
+def derive_n_guide_from_l(l_cm):
+    if l_cm <= 550:
+        return 2
+    if l_cm <= 1100:
+        return 3
+    return 4
+
+
+def guide_x_targets(l_cm, n_guide):
+    """N evenly-spaced guide centers across the full width, from -L/2 to
+    +L/2 (n_guide=2 lands exactly on the two edges, matching the original
+    2-guide-only geometry with zero change). n_guide=3 adds one at the
+    center; n_guide=4 adds two at the quarter points. No modeled reference
+    exists in flag.blend for a real 3/4-guide unit (the FBX reverse-
+    engineering only ever captured the 2-guide reference size) — this
+    reuses the edge Guida/Supporto pieces translated into place as the best
+    available approximation, not a verified reproduction of the real
+    intermediate hardware. Flagged to Davide; see 3d/NOTES.md."""
+    n_guide = max(2, min(4, round(n_guide)))
+    half = l_cm / 2
+    if n_guide == 2:
+        return [-half, half]
+    step = l_cm / (n_guide - 1)
+    return [-half + i * step for i in range(n_guide)]
+
+
 def _translate_to_yz(obj, target_y, target_z):
     cur_y, cur_z = _mesh_center_yz(obj)
     dy, dz = target_y - cur_y, target_z - cur_z
@@ -291,18 +365,30 @@ def build_trave_posteriore(L_cm, delta_x_cm, rail):
     return tp
 
 
-def build_supporto(delta_x_cm, rail):
-    supporto = bpy.data.objects["Supporto"]
-    rail_transform_verts(supporto, rail, delta_x_cm=delta_x_cm, extend=True)
-    mirror_x_copy(supporto, "Supporto.001")
-    return supporto
+def _build_rail_piece_with_intermediates(obj_name, rail, delta_x_cm, l_cm, n_guide):
+    """Builds the two edge copies of obj_name (exactly the original
+    2-guide-only behaviour, zero change at n_guide=2) plus, for n_guide=3/4,
+    plain-translated copies at the intermediate guide positions — see
+    guide_x_targets for the positions and why they're an approximation."""
+    piece = bpy.data.objects[obj_name]
+    rail_transform_verts(piece, rail, delta_x_cm=delta_x_cm, extend=True)
+    mirror_x_copy(piece, f"{obj_name}.001")
+
+    prefix = f"{obj_name}_intermedio_"
+    _remove_stale_copies(prefix)
+    targets = guide_x_targets(l_cm, n_guide)
+    for i, target_x in enumerate(targets[1:-1], start=1):
+        _translate_x_copy(piece, f"{prefix}{i}", target_x)
+
+    return piece
 
 
-def build_guida(rail, delta_x_cm):
-    guida = bpy.data.objects["Guida"]
-    rail_transform_verts(guida, rail, delta_x_cm=delta_x_cm, extend=True)
-    mirror_x_copy(guida, "Guida.001")
-    return guida
+def build_supporto(delta_x_cm, rail, l_cm, n_guide):
+    return _build_rail_piece_with_intermediates("Supporto", rail, delta_x_cm, l_cm, n_guide)
+
+
+def build_guida(rail, delta_x_cm, l_cm, n_guide):
+    return _build_rail_piece_with_intermediates("Guida", rail, delta_x_cm, l_cm, n_guide)
 
 
 def build_frangitratta(L_cm, rail, delta_x_cm):
@@ -514,7 +600,7 @@ def hide_unfinished_accessories():
             obj.hide_set(True)
 
 
-def build_pergola(L_cm, P_cm, H_cm, delta_h_cm, fissaggio):
+def build_pergola(L_cm, P_cm, H_cm, delta_h_cm, fissaggio, n_guide=2):
     delta_x_cm = L_cm / 2 - REF_L_CM / 2
     # Only the FRONT structure (Montante, Trave) moves with SP — the rear is
     # fixed at the wall bracket (world Y=0), per the 2026-09-26 rework.
@@ -527,8 +613,8 @@ def build_pergola(L_cm, P_cm, H_cm, delta_h_cm, fissaggio):
     build_montante_posteriore(delta_x_cm, rail)
     build_trave_posteriore(L_cm, delta_x_cm, rail)
 
-    build_supporto(delta_x_cm, rail)
-    build_guida(rail, delta_x_cm)
+    build_supporto(delta_x_cm, rail, L_cm, n_guide)
+    build_guida(rail, delta_x_cm, L_cm, n_guide)
     n_intermedi = build_frangitratta(L_cm, rail, delta_x_cm)
     build_tettuccio(L_cm, rail)
     build_telo(rail, delta_x_cm)
@@ -917,7 +1003,15 @@ def render_freestyle(output_path):
     bpy.ops.render.render(write_still=True)
 
 
-def render_colored(output_path, color_rgb, fissaggio, resolution=(1600, 1200), fabric_rgb=None):
+def render_colored(
+    output_path,
+    color_rgb,
+    fissaggio,
+    resolution=(1600, 1200),
+    fabric_rgb=None,
+    frangitratta_rgb=None,
+    include_backdrop=True,
+):
     """
     Documentazione preventivo (2026-09-28), quarta vista: non un tecnico a
     linee ma una prospettiva "come sarebbe davvero" — colore reale, luce
@@ -965,10 +1059,28 @@ def render_colored(output_path, color_rgb, fissaggio, resolution=(1600, 1200), f
         fabric_bsdf.inputs["Base Color"].default_value = (*fabric_rgb, 1.0)
         fabric_bsdf.inputs["Roughness"].default_value = 0.75
 
+    # Frangitratta pieces are the real "parti in plastica" — confirmed by
+    # the bundle's own catalog data, where colorePlastica's UI label is
+    # literally "Colore frangitratta" (2026-10-03; an earlier guess had
+    # lumped them in with the aluminum struttura color for lack of a known
+    # mapping). Non-metallic, matte — plastic, not painted aluminum.
+    frangitratta_mat = None
+    if frangitratta_rgb is not None:
+        frangitratta_mat = bpy.data.materials.new("PergolandoFrangitratta")
+        frangitratta_mat.use_nodes = True
+        ft_bsdf = next(n for n in frangitratta_mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+        ft_bsdf.inputs["Base Color"].default_value = (*frangitratta_rgb, 1.0)
+        ft_bsdf.inputs["Roughness"].default_value = 0.5
+
     for obj in vl.objects:
         if obj.type != "MESH" or not obj.visible_get():
             continue
-        piece_mat = fabric_mat if (fabric_mat is not None and obj.name == "Telo") else mat
+        if fabric_mat is not None and obj.name == "Telo":
+            piece_mat = fabric_mat
+        elif frangitratta_mat is not None and obj.name.startswith("Frangitratta"):
+            piece_mat = frangitratta_mat
+        else:
+            piece_mat = mat
         if obj.data.materials:
             for i in range(len(obj.data.materials)):
                 obj.data.materials[i] = piece_mat
@@ -980,41 +1092,47 @@ def render_colored(output_path, color_rgb, fissaggio, resolution=(1600, 1200), f
     size = mathutils.Vector([maxs[i] - mins[i] for i in range(3)])
     footprint = max(size.x, size.y)
 
-    bg_color = (0.86, 0.855, 0.85)
-    backdrop_mat = bpy.data.materials.new("PergolandoBackdrop")
-    backdrop_mat.use_nodes = True
-    backdrop_bsdf = next(n for n in backdrop_mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
-    backdrop_bsdf.inputs["Base Color"].default_value = (*bg_color, 1.0)
-    backdrop_bsdf.inputs["Roughness"].default_value = 0.9
+    # `include_backdrop=False`: for the wizard's photo-match overlay (a real
+    # site photo already provides the floor/wall), not the standalone
+    # documentation shot — skips the shadow-catcher floor/wall entirely so
+    # there's nothing to composite but the pergola itself, real materials,
+    # transparent elsewhere (2026-10-03).
+    if include_backdrop:
+        bg_color = (0.86, 0.855, 0.85)
+        backdrop_mat = bpy.data.materials.new("PergolandoBackdrop")
+        backdrop_mat.use_nodes = True
+        backdrop_bsdf = next(n for n in backdrop_mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+        backdrop_bsdf.inputs["Base Color"].default_value = (*bg_color, 1.0)
+        backdrop_bsdf.inputs["Roughness"].default_value = 0.9
 
-    # Floor + wall exist ONLY to give the ambient light something to bounce
-    # off and to catch a soft contact shadow under/behind the pergola — per
-    # Davide (2026-09-30), the floor/wall themselves must NOT be visible in
-    # the final image, only the pergola and the shadow it casts. Cycles'
-    # "shadow catcher" object flag does exactly this: the plane is fully
-    # transparent in the render except where a shadow actually falls on it,
-    # composited straight into the alpha channel — so it still needs to be
-    # physically present and lit for the shadow math to work, it just never
-    # shows as a solid backdrop.
-    bpy.ops.mesh.primitive_plane_add(size=footprint * 6, location=(center.x, center.y, mins[2]))
-    floor = bpy.context.active_object
-    floor.name = "PergolandoFloor"
-    floor.data.materials.append(backdrop_mat)
-    floor.is_shadow_catcher = True
+        # Floor + wall exist ONLY to give the ambient light something to
+        # bounce off and to catch a soft contact shadow under/behind the
+        # pergola — per Davide (2026-09-30), the floor/wall themselves must
+        # NOT be visible in the final image, only the pergola and the shadow
+        # it casts. Cycles' "shadow catcher" object flag does exactly this:
+        # the plane is fully transparent in the render except where a shadow
+        # actually falls on it, composited straight into the alpha channel —
+        # so it still needs to be physically present and lit for the shadow
+        # math to work, it just never shows as a solid backdrop.
+        bpy.ops.mesh.primitive_plane_add(size=footprint * 6, location=(center.x, center.y, mins[2]))
+        floor = bpy.context.active_object
+        floor.name = "PergolandoFloor"
+        floor.data.materials.append(backdrop_mat)
+        floor.is_shadow_catcher = True
 
-    if fissaggio == "parete":
-        # Vertical shadow catcher behind the wall-attachment side, same
-        # reasoning as the floor — never visible itself, only its shadow.
-        wall_y = maxs[1] + 0.02
-        bpy.ops.mesh.primitive_plane_add(
-            size=1.0, location=(center.x, wall_y, mins[2] + (maxs[2] - mins[2]) * 1.2)
-        )
-        wall = bpy.context.active_object
-        wall.name = "PergolandoWallBackdrop"
-        wall.rotation_euler = (math.radians(90), 0, 0)
-        wall.scale = (footprint * 2, (maxs[2] - mins[2]) * 3, 1)
-        wall.data.materials.append(backdrop_mat)
-        wall.is_shadow_catcher = True
+        if fissaggio == "parete":
+            # Vertical shadow catcher behind the wall-attachment side, same
+            # reasoning as the floor — never visible itself, only its shadow.
+            wall_y = maxs[1] + 0.02
+            bpy.ops.mesh.primitive_plane_add(
+                size=1.0, location=(center.x, wall_y, mins[2] + (maxs[2] - mins[2]) * 1.2)
+            )
+            wall = bpy.context.active_object
+            wall.name = "PergolandoWallBackdrop"
+            wall.rotation_euler = (math.radians(90), 0, 0)
+            wall.scale = (footprint * 2, (maxs[2] - mins[2]) * 3, 1)
+            wall.data.materials.append(backdrop_mat)
+            wall.is_shadow_catcher = True
 
     # HDRI instead of a flat World color (Davide, 2026-09-30): a single flat
     # color has no variation for a metallic material to reflect, which was
@@ -1100,6 +1218,76 @@ def render_mask(output_path):
     bpy.ops.render.render(write_still=True)
 
 
+# Material-category ID pass (2026-10-03, richiesto da Davide): un riferimento
+# extra per ComfyUI/ControlNet accanto a canny/depth/mask — colori piatti e
+# NON illuminati, uno per categoria di materiale reale, non un render
+# fotorealistico. Rosso = struttura in alluminio, verde = plastica, giallo =
+# telo in tessuto. Correzione importante (2026-10-03, stesso giorno): i pezzi
+# "Frangitratta" sono le parti in plastica reali — confermato dal catalogo del
+# bundle stesso, dove l'etichetta UI di colorePlastica è letteralmente "Colore
+# frangitratta" (`apps/studio/storage/bundles/Flag/*/catalog/database.json`,
+# `prodotto.colori.parti_plastiche.tag`) — un tentativo precedente li aveva
+# lasciati nel rosso/struttura per mancanza di un mapping noto.
+MATERIAL_ID_STRUTTURA_RGB = (1.0, 0.0, 0.0)
+MATERIAL_ID_PLASTICA_RGB = (0.0, 1.0, 0.0)
+MATERIAL_ID_TELO_RGB = (1.0, 1.0, 0.0)
+
+
+def render_material_id(output_path):
+    """
+    Pass "ID materiale": un colore piatto, non illuminato (shader Emission
+    puro — niente luce, niente ombre, niente riflessi: il colore in output è
+    sempre esattamente quello assegnato, indipendentemente dall'angolazione
+    o dall'illuminazione) per categoria di pezzo. Stessa camera/risoluzione
+    del Canny/depth/mask per restare nello stesso set coerente.
+    """
+    scene = bpy.context.scene
+    cam = scene.camera
+    if cam is None:
+        raise RuntimeError("render_material_id requires a camera to already be set")
+
+    vl = bpy.context.view_layer
+
+    def flat_material(name, rgb):
+        mat = bpy.data.materials.new(name)
+        mat.use_nodes = True
+        nt = mat.node_tree
+        nt.nodes.clear()
+        emission = nt.nodes.new("ShaderNodeEmission")
+        emission.inputs["Color"].default_value = (*rgb, 1.0)
+        emission.inputs["Strength"].default_value = 1.0
+        output_node = nt.nodes.new("ShaderNodeOutputMaterial")
+        nt.links.new(emission.outputs[0], output_node.inputs["Surface"])
+        return mat
+
+    struttura_mat = flat_material("MaterialID_Struttura", MATERIAL_ID_STRUTTURA_RGB)
+    telo_mat = flat_material("MaterialID_Telo", MATERIAL_ID_TELO_RGB)
+    plastica_mat = flat_material("MaterialID_Plastica", MATERIAL_ID_PLASTICA_RGB)
+
+    for obj in vl.objects:
+        if obj.type != "MESH" or not obj.visible_get():
+            continue
+        if obj.name == "Telo":
+            piece_mat = telo_mat
+        elif obj.name.startswith("Frangitratta"):
+            piece_mat = plastica_mat
+        else:
+            piece_mat = struttura_mat
+        if obj.data.materials:
+            for i in range(len(obj.data.materials)):
+                obj.data.materials[i] = piece_mat
+        else:
+            obj.data.materials.append(piece_mat)
+
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = 16  # flat emission colors, no noise to resolve
+    scene.render.film_transparent = True
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.image_settings.color_mode = "RGBA"
+    scene.render.filepath = output_path
+    bpy.ops.render.render(write_still=True)
+
+
 def main():
     argv = sys.argv
     argv = argv[argv.index("--") + 1 :] if "--" in argv else []
@@ -1118,12 +1306,14 @@ def main():
     else:
         raise SystemExit("--config or --config-json is required")
 
+    n_guide = cfg["nGuide"] if "nGuide" in cfg else derive_n_guide_from_l(cfg["L_cm"])
     build_pergola(
         L_cm=cfg["L_cm"],
         P_cm=cfg["P_cm"],
         H_cm=cfg["H_cm"],
         delta_h_cm=cfg["deltaH_cm"],
         fissaggio=cfg.get("fissaggio", "autoportante"),
+        n_guide=n_guide,
     )
 
     output_mode = cfg.get("outputMode", "silhouette")
@@ -1157,6 +1347,7 @@ def main():
     if output_mode == "colored":
         color_rgb = tuple(cfg.get("colorRgb", [0.82, 0.80, 0.77]))
         fabric_rgb = tuple(cfg["fabricRgb"]) if "fabricRgb" in cfg else None
+        frangitratta_rgb = tuple(cfg["frangitrattaRgb"]) if "frangitrattaRgb" in cfg else None
         colored_camera_cfg = cfg.get("camera")
         if colored_camera_cfg:
             # Match this shot's line art/depth/mask exactly, instead of
@@ -1169,7 +1360,12 @@ def main():
                 colored_camera_cfg["imageHeightPx"],
             )
         render_colored(
-            args.output, color_rgb, cfg.get("fissaggio", "autoportante"), fabric_rgb=fabric_rgb
+            args.output,
+            color_rgb,
+            cfg.get("fissaggio", "autoportante"),
+            fabric_rgb=fabric_rgb,
+            frangitratta_rgb=frangitratta_rgb,
+            include_backdrop=cfg.get("includeBackdrop", True),
         )
         if args.save_blend:
             bpy.ops.wm.save_as_mainfile(filepath=args.save_blend)
@@ -1284,6 +1480,8 @@ def main():
         render_freestyle(args.output)
     elif output_mode == "mask":
         render_mask(args.output)
+    elif output_mode == "material_id":
+        render_material_id(args.output)
     else:
         render_isolated(args.output, transparent=bool(camera_cfg))
 

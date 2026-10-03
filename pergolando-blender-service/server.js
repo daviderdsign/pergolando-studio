@@ -87,6 +87,18 @@ async function handleRender3d(req, res) {
       BLENDER_EXECUTABLE_PATH,
       [
         '--background',
+        // Skips the user's own addons/preferences for this one headless
+        // invocation (factory defaults only) — without it, every single
+        // render in this session loaded two unrelated third-party addons:
+        // "bonsai" (a BIM/IFC addon, Python-version-incompatible with this
+        // Blender build, printing a RuntimeError on every launch) and
+        // BlenderKit (an asset-library addon that spawns its own separate
+        // client process on startup). Neither has any business in a
+        // scripted render service; found while diagnosing a real Blender
+        // crash ("bad allocation" loading OpenColorIO) that coincided with
+        // a leftover BlenderKit client process still running from an
+        // earlier failed render — see 3d/NOTES.md.
+        '--factory-startup',
         flagBlendPath,
         '--python',
         scriptPath,
