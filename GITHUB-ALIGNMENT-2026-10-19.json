@@ -1,6 +1,6 @@
 {
   "date": "2026-10-19",
-  "branch": "codex/github-alignment-2026-10-19",
+  "branch": "main",
   "repositories": [
     {
       "name": "pergolando-shared",
@@ -9,13 +9,21 @@
     },
     {
       "name": "pergolando-backend",
-      "commit": "b371320090de65c9bfac806b4a670092fd5a10b1"
+      "commit": "9f538449588030cad82abc435dad355ddd311d8d"
     },
     {
       "name": "pergolando-frontend",
-      "commit": "711d3deb2c4f028fa44b274cd36ac0c27bd7cac4"
+      "commit": "466971679194a110fbb45d73fbbbaf2862feabfd"
     }
   ],
   "studio": "Commit containing this manifest; resolve with git rev-parse HEAD",
-  "nasDeploymentPerformed": false
+  "nasDeploymentPerformed": false,
+  "checks": {
+    "sharedLocalTests": 35,
+    "backendLocalTests": 24,
+    "backendGitHubRun": 39232847639,
+    "frontendGitHubRun": 39233893547,
+    "backendCI": "success",
+    "frontendCI": "success"
+  }
 }
