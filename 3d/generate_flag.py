@@ -49,6 +49,7 @@ import json
 import math
 import sys
 from pathlib import Path
+sys.path.insert(0,str(Path(__file__).parent))
 
 import bmesh
 import bpy
@@ -1210,15 +1211,16 @@ def render_colored(
     # plastic" shader was exactly the "flat, no shading" look Davide
     # flagged, 2026-09-30) — needs a varied environment to reflect (see
     # HDRI below), not just a flat color, or it still reads as flat.
-    # Roughness lowered 0.3 -> 0.15 (2026-10-04, Davide, visual call: wants
-    # a noticeably more metallic/shiny look than the previous satin finish
-    # — not a final number, just a first pass to tune from).
+    # Roughness: 0.3 -> 0.15 (2026-10-04) read as near-chrome/mirror-like
+    # hard streak highlights instead of a painted-metal sheen — reverted
+    # direction, raised to 0.5 (2026-10-05, Davide: "molto meno
+    # riflettenti"). Still not declared final — easy to re-tune from here.
     mat = bpy.data.materials.new("PergolandoColored")
     mat.use_nodes = True
     bsdf = next(n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
     bsdf.inputs["Base Color"].default_value = (*color_rgb, 1.0)
     bsdf.inputs["Metallic"].default_value = 0.9
-    bsdf.inputs["Roughness"].default_value = 0.15
+    bsdf.inputs["Roughness"].default_value = 0.5
 
     fabric_mat = None
     if fabric_rgb is not None:
@@ -1478,6 +1480,7 @@ def render_material_id(output_path):
 
 
 def main():
+    from pathlib import Path
     argv = sys.argv
     argv = argv[argv.index("--") + 1 :] if "--" in argv else []
     parser = argparse.ArgumentParser()
@@ -1506,6 +1509,11 @@ def main():
     )
     apply_visual_offset(cfg.get("offsetXCm", 0.0), cfg.get("offsetZCm", 0.0))
 
+    if cfg.get("technicalViews"):
+        sys.path.insert(0, str(Path(__file__).parent))
+        from technical_views import render_technical_views
+        render_technical_views(args.output,cfg)
+        return
     output_mode = cfg.get("outputMode", "silhouette")
 
     # Technical 2D elevations/plan (documentazione preventivo, 2026-09-28):
@@ -1549,6 +1557,8 @@ def main():
                 colored_camera_cfg["imageWidthPx"],
                 colored_camera_cfg["imageHeightPx"],
             )
+            from photo_intrinsics import apply_photo_intrinsics
+            apply_photo_intrinsics(bpy.context.scene,bpy.context.scene.camera.data,colored_camera_cfg)
         render_colored(
             args.output,
             color_rgb,
@@ -1557,6 +1567,10 @@ def main():
             frangitratta_rgb=frangitratta_rgb,
             include_backdrop=cfg.get("includeBackdrop", True),
         )
+        if cfg.get('includeShadows') and cfg.get('camera'):
+            sys.path.insert(0,str(Path(__file__).parent))
+            from eevee_shadows import render_floor_shadows
+            render_floor_shadows(bpy.context.scene,args.output,cfg)
         if args.save_blend:
             bpy.ops.wm.save_as_mainfile(filepath=args.save_blend)
         return
@@ -1570,6 +1584,8 @@ def main():
             camera_cfg["imageWidthPx"],
             camera_cfg["imageHeightPx"],
         )
+        from photo_intrinsics import apply_photo_intrinsics
+        apply_photo_intrinsics(bpy.context.scene,bpy.context.scene.camera.data,camera_cfg)
     else:
         # simple default orbit camera + basic lighting, for a quick visual
         # sanity check only — not meant to look "good", just legible.

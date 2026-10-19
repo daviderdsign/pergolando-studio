@@ -1,0 +1,15 @@
+# Assistenza cliente e ticket — 16 ottobre 2026
+
+Nuova pagina rivenditore /pratiche/:id/assistenza, raggiungibile dal percorso inferiore e dai verbali. Abilitazione accesso dopo consegna/collaudo, anche con costi/fatture incompleti. Il rivenditore genera un collegamento riservato valido 30 giorni; un nuovo collegamento revoca i precedenti. Richiede email cliente valida nella pratica. Token casuale a 256 bit, salvato solo come hash nel database, trasmesso in frammento URL e header dedicato oscurato nei log. Nessuna chiave IA coinvolta.
+
+L’accesso è tramite possesso del collegamento, non un account cliente con password né una verifica di identità/email tramite OTP. Il link deve essere consegnato esclusivamente al cliente. Accesso negato dopo scadenza/revoca, cambio email della pratica o revoca dello stato consegna. Il rivenditore conserva l’accesso gestionale ai ticket.
+
+Invito email esplicito: destinatario della pratica e contenuto illustrati prima della conferma, SMTP lato server, stato archiviato. Un accesso non viene inviato più volte dopo SMTP accettato o esito incerto; gli errori sicuramente falliti permettono un nuovo tentativo. Interruzioni in SENDING sono da trattare come incerte, senza reinvio automatico. Una nuova generazione produce un nuovo link e invalida quello precedente. Copia manuale del link disponibile. Nessuna email reale spedita nei test.
+
+Portale cliente /assistenza#token: titolo pratica e richieste, nuova richiesta con priorità normale/alta e foto, conversazione e risposte. Stati aperta/in lavorazione/in attesa cliente/risolta/chiusa. Una risposta del cliente riapre le richieste chiuse, risolte o in attesa. Il rivenditore assegna un responsabile testuale, cambia stato/priorità e distingue nota interna da messaggio pubblico. Le API pubbliche non restituiscono note interne, responsabile, prezzi o contabilità. Gli aggiornamenti si vedono con Ricarica richieste: notifiche automatiche ancora da sviluppare.
+
+Foto PNG/JPEG: massimo tre per invio, 3 MB ciascuna, dodici/20 MB complessivi per ticket; controllo formato/signatura e dimensioni, deduplicazione per hash, download riservato alla stessa pratica. Nessuna immagine pubblica senza token. Limite tecnico di 100 richieste per pratica esplicitato in caso di superamento. Ticket ed eventi conservati con revisioni, retry idempotenti e controllo concorrenza. Non registra interventi, ricambi o costi automaticamente.
+
+Migrazione additiva 20261016235900_support. Fare backup DB prima del deploy. Backend/frontend compilati, test assistenza/consegna/setup passati; Chromium con API simulate a 320/390 px, screenshot controllati. Nessuna chiamata IA, email reale, migrazione del database operativo locale o deploy NAS.
+
+Prossimi blocchi: notifiche automatiche per nuove richieste/risposte/stati con storico esiti, pianificazione interventi/ricambi e collegamenti economici; account cliente/OTP se richiesto, calendario risorse, traduzione EN e collaudo NAS da completare. Questo modulo è attualmente in italiano, compreso il portale cliente.

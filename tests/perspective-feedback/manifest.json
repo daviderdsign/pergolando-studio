@@ -1,0 +1,79 @@
+{
+  "cases": [
+    {
+      "id": "caso-01",
+      "originalAvailable": true,
+      "labelsSource": "coordinate corrette dal venditore nel laboratorio",
+      "automaticProposalAvailable": true,
+      "acceptedUnmodified": false,
+      "metrics": {
+        "cx": 1038.2988797718608,
+        "cy": 625.648942667954,
+        "focalSquared": 993677.0785155394,
+        "cameraIndicativaPlausibile": true
+      },
+      "automaticProposalNote": "Proposta ricalcolata sugli originali; non è quella storica."
+    },
+    {
+      "id": "caso-02",
+      "originalAvailable": true,
+      "labelsSource": "coordinate corrette dal venditore nel laboratorio",
+      "automaticProposalAvailable": true,
+      "acceptedUnmodified": false,
+      "metrics": {
+        "cx": 1071.2883301328782,
+        "cy": 788.4070760619453,
+        "focalSquared": 1212371.0656514051,
+        "cameraIndicativaPlausibile": false
+      },
+      "automaticProposalNote": "Proposta ricalcolata sugli originali; non è quella storica."
+    },
+    {
+      "id": "caso-03",
+      "originalAvailable": true,
+      "labelsSource": "coordinate corrette dal venditore nel laboratorio",
+      "automaticProposalAvailable": true,
+      "acceptedUnmodified": false,
+      "metrics": {
+        "cx": 2980.303214014278,
+        "cy": 1025.68619305733,
+        "focalSquared": 15751722.621962972,
+        "cameraIndicativaPlausibile": false
+      },
+      "originalSourceName": "sfondo_d.jpg",
+      "automaticProposalNote": "Proposta ricalcolata sugli originali; non è quella storica."
+    },
+    {
+      "id": "caso-04",
+      "originalAvailable": true,
+      "labelsSource": "coordinate corrette dal venditore nel laboratorio",
+      "automaticProposalAvailable": true,
+      "acceptedUnmodified": false,
+      "metrics": {
+        "cx": 666.147000240571,
+        "cy": 530.8457684886548,
+        "focalSquared": 1092802.7859493373,
+        "cameraIndicativaPlausibile": true
+      },
+      "originalSourceName": "sfondo_e.jpg",
+      "automaticProposalNote": "Proposta ricalcolata sugli originali; non è quella storica."
+    },
+    {
+      "id": "caso-05",
+      "originalAvailable": true,
+      "labelsSource": "coordinate corrette dal venditore nel laboratorio",
+      "automaticProposalAvailable": true,
+      "acceptedUnmodified": true,
+      "metrics": {
+        "cx": 22.562234085504542,
+        "cy": 635.6416863375895,
+        "focalSquared": 1603695.6099731429,
+        "cameraIndicativaPlausibile": true
+      },
+      "originalSourceName": "sfondo_b.jpg",
+      "automaticProposalNote": "Proposta ricalcolata sugli originali; non è quella storica."
+    }
+  ],
+  "duplicateJsonCount": 1,
+  "warning": "Non eseguire il rilevatore sulle verifiche annotate: produrrebbe una valutazione falsata."
+}

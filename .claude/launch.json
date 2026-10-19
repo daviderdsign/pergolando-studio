@@ -1,41 +1,85 @@
 {
-  "version": "0.0.1",
-  "configurations": [
-    {
-      "name": "studio",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@pergolando/studio", "run", "dev"],
-      "port": 3000
-    },
-    {
-      "name": "venditore-frontend",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--dir", "pergolando-frontend", "run", "dev"],
-      "port": 3000
-    },
-    {
-      "name": "studio-basepath-check",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@pergolando/studio", "run", "start"],
-      "port": 3000
-    },
-    {
-      "name": "venditore-backend",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--dir", "pergolando-backend", "run", "start:dev"],
-      "port": 3001
-    },
-    {
-      "name": "blender-service",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--dir", "pergolando-blender-service", "run", "dev"],
-      "port": 8080
-    },
-    {
-      "name": "geocalib-service",
-      "runtimeExecutable": "pergolando-geocalib-service/.venv/Scripts/python.exe",
-      "runtimeArgs": ["pergolando-geocalib-service/server.py"],
-      "port": 8090
-    }
-  ]
+    "version":  "0.0.1",
+    "configurations":  [
+                           {
+                               "name":  "studio",
+                               "runtimeExecutable":  "pnpm",
+                               "runtimeArgs":  [
+                                                   "--filter",
+                                                   "@pergolando/studio",
+                                                   "exec",
+                                                   "next",
+                                                   "dev",
+                                                   "-p",
+                                                   "3100"
+                                               ],
+                               "port":  3100
+                           },
+                           {
+                               "name":  "studio-3100",
+                               "runtimeExecutable":  "pnpm",
+                               "runtimeArgs":  [
+                                                   "--filter",
+                                                   "@pergolando/studio",
+                                                   "exec",
+                                                   "next",
+                                                   "dev",
+                                                   "-p",
+                                                   "3100"
+                                               ],
+                               "port":  3100
+                           },
+                           {
+                               "name":  "venditore-frontend",
+                               "runtimeExecutable":  "pnpm",
+                               "runtimeArgs":  [
+                                                   "--dir",
+                                                   "pergolando-frontend",
+                                                   "run",
+                                                   "dev"
+                                               ],
+                               "port":  3000
+                           },
+                           {
+                               "name":  "studio-basepath-check",
+                               "runtimeExecutable":  "pnpm",
+                               "runtimeArgs":  [
+                                                   "--filter",
+                                                   "@pergolando/studio",
+                                                   "run",
+                                                   "start"
+                                               ],
+                               "port":  3000
+                           },
+                           {
+                               "name":  "venditore-backend",
+                               "runtimeExecutable":  "pnpm",
+                               "runtimeArgs":  [
+                                                   "--dir",
+                                                   "pergolando-backend",
+                                                   "run",
+                                                   "start:dev"
+                                               ],
+                               "port":  3001
+                           },
+                           {
+                               "name":  "blender-service",
+                               "runtimeExecutable":  "pnpm",
+                               "runtimeArgs":  [
+                                                   "--dir",
+                                                   "pergolando-blender-service",
+                                                   "run",
+                                                   "dev"
+                                               ],
+                               "port":  8080
+                           },
+                           {
+                               "name":  "geocalib-service",
+                               "runtimeExecutable":  "pergolando-geocalib-service/.venv/Scripts/python.exe",
+                               "runtimeArgs":  [
+                                                   "pergolando-geocalib-service/server.py"
+                                               ],
+                               "port":  8090
+                           }
+                       ]
 }

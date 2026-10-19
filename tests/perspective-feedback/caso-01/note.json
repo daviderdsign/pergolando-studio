@@ -1,0 +1,14 @@
+{
+  "id": "caso-01",
+  "originalAvailable": true,
+  "labelsSource": "coordinate corrette dal venditore nel laboratorio",
+  "automaticProposalAvailable": true,
+  "acceptedUnmodified": false,
+  "metrics": {
+    "cx": 1038.2988797718608,
+    "cy": 625.648942667954,
+    "focalSquared": 993677.0785155394,
+    "cameraIndicativaPlausibile": true
+  },
+  "automaticProposalNote": "Proposta ricalcolata sugli originali; non è quella storica."
+}

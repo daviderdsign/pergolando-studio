@@ -1065,6 +1065,58 @@ nella fase hover-mouse: con `setPointerCapture` attivo durante un trascinamento 
 Non ancora verificato dal vivo da Davide (solo typecheck/lint puliti) — da confermare al
 prossimo test nel wizard.
 
+### Accesso da remoto via Tailscale, bug lente su mobile, roughness + lag (2026-10-05, test dal vivo da telefono)
+
+Davide ha testato il wizard dal telefono (fuori casa, PC acceso) tramite **Tailscale**, già
+attivo su questa macchina e sul suo telefono (stessa tailnet: `davide2`, `nas`,
+`z-flip6-di-davide`) — nessuna configurazione nuova necessaria, bastava l'IP Tailscale del
+PC (`100.83.13.118`) al posto dell'IP LAN. Due fix di configurazione locale (entrambi in
+file `.env*`, non committati, mai nel repo):
+- `pergolando-frontend/src/lib/api.ts`: l'URL del backend non è più una const letta una
+  volta a livello di modulo da `NEXT_PUBLIC_API_URL` (hardcoded nel `.env.local` all'IP
+  LAN) — ora `resolveApiBaseUrl()` deriva l'host dal `window.location.hostname` della
+  pagina stessa quando la env var non è impostata, quindi funziona automaticamente da LAN,
+  Tailscale o localhost senza dover più toccare la config. `.env.local`'s
+  `NEXT_PUBLIC_API_URL` commentata.
+- `pergolando-backend/.env`: `CORS_ORIGIN` esteso con l'origine Tailscale
+  (`http://100.83.13.118:3000`) accanto a quelle già presenti.
+
+Due bug reali trovati SOLO testando da un telefono vero (mai visti testando da desktop):
+1. **Menu contestuale nativo Android/iOS sulla foto**: una pressione lunga (esattamente il
+   gesto per posizionare un punto con la lente) apriva il menu "salva immagine/Copilot/
+   cerca con..." del sistema invece di raggiungere il componente. Fix:
+   `onContextMenu={(e) => e.preventDefault()}` sull'`<img>` + CSS `-webkit-touch-callout:
+   none` (necessario anche per iOS Safari, che a volte ignora il solo evento JS) e
+   `user-select: none`.
+2. **Trascinamento del dito intercettato come scroll della pagina**: `touch-action: none`
+   era impostato solo su `.griglia-trascinabile` (fase griglia), non sulla classe base
+   `.punti-riferimento-image` usata nella fase di tap dei punti — quindi un tap-e-trascina
+   per aggiustare un punto veniva letto dal browser come uno scroll/pan della pagina invece
+   che come il drag custom per la lente. Solo un tap fermo (senza movimento percepibile)
+   funzionava correttamente. Fix: `touch-action: none` spostato sulla classe base.
+
+Dopo questi due fix, Davide conferma che funziona "molto meglio" ma segnala un **ritardo
+visibile** nell'aggiornamento del contenuto/posizione della lente rispetto al dito. Causa
+probabile: entrambi gli `useEffect` di `Magnifier` (ridisegno canvas + riposizionamento)
+girano DOPO il paint del browser — ogni movimento del dito lasciava un frame in cui la
+lente mostrava ancora il contenuto/posizione PRECEDENTE prima di aggiornarsi. Fix: entrambi
+passati a **`useLayoutEffect`** (sincrono, prima del paint, stesso frame dell'evento
+pointer che l'ha causato) — pattern React standard per UI che deve seguire il puntatore
+senza un frame di ritardo percepibile.
+
+**Materiali ancora troppo riflettenti**: vista la foto reale composita, Davide ha chiesto
+di ridurre parecchio la riflettività (prima descritta come "va bene più metallico", ora
+"molto meno riflettente" — la roughness 0.15 del giro precedente dava uno sguardo da cromo/
+specchio con striature dure, non da alluminio verniciato). Alzata a **0.5**. Chiesto anche
+di "caricare un HDRI come background per influenzare l'illuminazione" — **l'HDRI era già
+attivo** (`3d/hdri/studio_small_08_1k.hdr`, caricato come World per ogni render colorato,
+sezione precedente) — l'ipotesi è che col materiale quasi a specchio di prima il suo
+effetto fosse mascherato da riflessi duri puntuali invece che leggibile come sfumatura
+morbida diffusa; con la roughness più alta ora si vede una transizione di luce graduale
+sulle gambe, plausibilmente già quello che Davide intendeva. Non ancora confermato da lui
+se questo risolve la richiesta o se intendeva davvero un HDRI diverso (es. uno esterno più
+ricco invece dello studio piccolo attuale).
+
 ## `pergolando-blender-service` — container isolato (Fase G)
 
 Blender **non** viene eseguito dentro `pergolando-backend`. È isolato in un proprio
