@@ -24,6 +24,7 @@ full history.
 """
 
 import base64
+import io
 import json
 import math
 import os
@@ -34,8 +35,13 @@ import cv2
 import numpy as np
 import torch
 from geocalib import GeoCalib
+from PIL import Image, ImageOps
 
-from resection import ResectionError, project, resect_points, rotmat
+from resection import ResectionError, project, resect_points, rotmat, resect_with_vertical, resect_with_ground_direction, resect_independent_references
+
+from auto_references import detect_references
+from photo_directions import detect_six,calibrate_six
+from architectural_lines import architectural_directions, orthogonal_focal, depth_family_from_prior
 
 PORT = int(os.environ.get("PORT", 8090))
 MAX_BODY_BYTES = 30_000_000  # a phone photo, base64-encoded
@@ -52,6 +58,8 @@ def get_model():
 
 
 def calibrate_placement(payload):
+    if payload.get("puntiFuga") is not None:
+        return calibrate_six(payload)
     punti = payload.get("punti")
     if not isinstance(punti, list) or len(punti) != 2:
         raise ValueError("servono esattamente 2 punti (inizio/fine della riga)")
@@ -71,9 +79,36 @@ def calibrate_placement(payload):
     h_cm = float(payload["altezzaCm"])
 
     image_bytes = base64.b64decode(foto_b64)
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
-        f.write(image_bytes)
-        tmp_path = f.name
+
+    # Downscale before handing the image to GeoCalib — a real phone photo
+    # (e.g. 4096x3072, 12.6MP) makes GeoCalib's own internal preprocessing
+    # (kornia's anti-alias gaussian blur before resize) allocate a buffer
+    # proportional to the INPUT resolution, not its target working size —
+    # ~384MB for a single intermediate on a 12.6MP image, which exhausted
+    # available memory. Reproduced standalone outside the server as a clean
+    # `RuntimeError: not enough memory` from kornia/torch's CPU allocator;
+    # inside the long-running threaded server the same condition instead
+    # surfaced as a native access violation (process death, no Python
+    # traceback at all) — found 2026-10-03 testing against a real phone
+    # photo for the first time (every earlier test used small, pre-shrunk
+    # test images). Camera calibration itself needs no fine detail, so
+    # resizing first is strictly a fix, not a quality tradeoff; `punti` are
+    # normalized (xNorm/yNorm) and `fx/fy/cx/cy` are computed from whatever
+    # size we actually load, so everything downstream (resection, the
+    # reprojected tettoNormalizzato) stays self-consistent regardless of
+    # which resolution this ends up being.
+    MAX_DIMENSION_PX = 1600
+    with Image.open(io.BytesIO(image_bytes)) as pil_image:
+        pil_image = ImageOps.exif_transpose(pil_image)
+        pil_image = pil_image.convert("RGB")
+        if max(pil_image.size) > MAX_DIMENSION_PX:
+            scale = MAX_DIMENSION_PX / max(pil_image.size)
+            new_size = (round(pil_image.width * scale), round(pil_image.height * scale))
+            pil_image = pil_image.resize(new_size, Image.LANCZOS)
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            pil_image.save(f, format="JPEG", quality=92)
+            analysis_rgb=np.asarray(pil_image).copy()
+            tmp_path = f.name
 
     try:
         model = get_model()
@@ -91,9 +126,20 @@ def calibrate_placement(payload):
     fx = float(camera.f[..., 0].squeeze())
     fy = float(camera.f[..., 1].squeeze())
     cx, cy = w_px / 2.0, h_px / 2.0
+    focal35=payload.get("focaleEquivalente35Mm")
+    if focal35 is not None:
+        focal35=float(focal35)
+        if not np.isfinite(focal35) or not 5<=focal35<=1000:raise ValueError("focale EXIF non valida")
+        exif_fx=focal35*math.hypot(w_px,h_px)/math.hypot(36,24)
+        if .4<exif_fx/fx<2.5:
+            fy=exif_fx*(fy/fx);fx=exif_fx
+            print("EXIF_FOCAL",focal35,fx,flush=True)
     roll = float(gravity.roll.squeeze())
     pitch = float(gravity.pitch.squeeze())
 
+    # Canonical left-to-right wall direction, independent of tap order.
+    original_first_is_right = punti[0]["xNorm"] > punti[1]["xNorm"]
+    punti = sorted(punti, key=lambda p: (p["xNorm"], p["yNorm"]))
     p1_px = (punti[0]["xNorm"] * w_px, punti[0]["yNorm"] * h_px)
     p2_px = (punti[1]["xNorm"] * w_px, punti[1]["yNorm"] * h_px)
 
@@ -129,7 +175,7 @@ def calibrate_placement(payload):
     if punto_controllo and linea_controllo_lunghezza_cm:
         controllo_px = (punto_controllo["xNorm"] * w_px, punto_controllo["yNorm"] * h_px)
         controllo_world = (
-            corner_world[0],
+            wall_end_world[0] if original_first_is_right else corner_world[0],
             corner_world[1],
             corner_world[2] - float(linea_controllo_lunghezza_cm),
         )
@@ -138,6 +184,71 @@ def calibrate_placement(payload):
 
     yaw, t = resect_points(points_world, points_px, roll, pitch, fx, fy, cx, cy)
 
+    print("POSE_BASE", yaw, t.tolist(), roll, pitch, flush=True)
+    vertical = payload.get("puntiVerticali")
+    vertical_height = payload.get("altezzaVerticaleCm")
+    depth_line = payload.get("puntiProfondita")
+    if vertical is not None or vertical_height is not None:
+        if not isinstance(vertical, list) or len(vertical) != 2 or vertical_height is None:
+            raise ValueError("servono due punti verticali e la misura del tratto")
+        vertical_px = [(p["xNorm"]*w_px, p["yNorm"]*h_px) for p in vertical]
+        if depth_line is None:
+            yaw, t, roll, pitch = resect_with_vertical(points_world, points_px, vertical_px, float(vertical_height), p_cm, roll, pitch, fx, fy, cx, cy)
+
+    print("POSE_VERTICAL", yaw, t.tolist(), roll, pitch, flush=True)
+    calibration_warning = None
+    depth_line = payload.get("puntiProfondita")
+    if depth_line is not None:
+        if not isinstance(depth_line, list) or len(depth_line) != 2:
+            raise ValueError("servono due punti del bordo del pavimento")
+        depth_line = sorted(depth_line, key=lambda p: (p["xNorm"], p["yNorm"]))
+        depth_px = [(p["xNorm"]*w_px, p["yNorm"]*h_px) for p in depth_line]
+        vp = [(p["xNorm"]*w_px, p["yNorm"]*h_px) for p in vertical] if vertical else None
+        prior_pose = (yaw, t.copy(), roll, pitch)
+        # GeoCalib can resize; all line detections and pixel references must match.
+        analysis_rgb=cv2.resize(analysis_rgb,(w_px,h_px))
+        families=architectural_directions(analysis_rgb,points_px[:2],vp,np.array([[fx,0,cx],[0,fy,cy],[0,0,1.]]),rotmat(roll,pitch,yaw))
+        K=np.array([[fx,0,cx],[0,fy,cy],[0,0,1.]])
+        measured_focal=orthogonal_focal(families,K)
+        if measured_focal is not None:
+            ratio=fy/fx;fx=measured_focal["fx"];fy=fx*ratio
+            K=np.array([[fx,0,cx],[0,fy,cy],[0,0,1.]])
+            yaw,t=resect_points(points_world,points_px,roll,pitch,fx,fy,cx,cy)
+            prior_pose=(yaw,t.copy(),roll,pitch)
+            print("ARCHITECTURAL_FOCAL",fx,measured_focal["relative_spread"],flush=True)
+        if len(families)==2:
+            rays=[np.linalg.inv(K)@family["vp"] for _,family in families]
+            expected_depth=np.cross(rays[0],rays[1]);expected_depth/=np.linalg.norm(expected_depth)
+            depth_family=depth_family_from_prior(analysis_rgb,K,expected_depth)
+            if depth_family is not None:families.append((2,depth_family))
+        constraints=[]
+        for axis,family in families:
+            ray=np.linalg.inv(K)@family["vp"];ray/=np.linalg.norm(ray)
+            constraints.append((axis,ray))
+        print("ARCHITECTURAL_LINES",[(axis,family["count"],family["angular_rms_deg"],family["vp"].tolist()) for axis,family in families],flush=True)
+        debug_dir=os.environ.get("PERGOLANDO_CALIBRATION_DEBUG_DIR")
+        if debug_dir:
+            os.makedirs(debug_dir,exist_ok=True)
+            diagnostic=cv2.cvtColor(analysis_rgb,cv2.COLOR_RGB2BGR)
+            cv2.imwrite(os.path.join(debug_dir,"foto-originale.png"),diagnostic)
+            for axis,family in families:
+                color=(80,80,225) if axis==0 else (80,180,60) if axis==1 else (230,130,40)
+                for a,b in family["segments"]:
+                    cv2.line(diagnostic,tuple(np.round(a).astype(int)),tuple(np.round(b).astype(int)),color,3)
+            cv2.imwrite(os.path.join(debug_dir,"linee-rilevate.png"),diagnostic)
+
+        try:
+            yaw, t, roll, pitch, focal_scale = resect_independent_references(points_world, points_px, depth_px, p_cm, roll, pitch, fx, fy, cx, cy, vp, float(vertical_height) if vertical_height else None, architectural=constraints)
+            fx *= focal_scale
+            fy *= focal_scale
+            print("INDEPENDENT_REFERENCES focal_scale", focal_scale, flush=True)
+        except ResectionError as err:
+            yaw, t, roll, pitch = prior_pose
+            print("Depth reference fallback:", str(err), flush=True)
+            calibration_warning = "Il bordo laterale non concorda con la stima della foto. Uso la riga misurata" + ("") + ": controlla il volume prima del rendering."
+
+
+    print("POSE_FINAL", yaw, t.tolist(), roll, pitch, "fx", fx, flush=True)
     R = rotmat(roll, pitch, yaw)
     rvec, _ = cv2.Rodrigues(R)
 
@@ -156,6 +267,7 @@ def calibrate_placement(payload):
     fov_deg = math.degrees(2 * math.atan(w_px / (2 * fx)))
 
     return {
+        "avviso": calibration_warning,
         "rvec": rvec.flatten().tolist(),
         "tvec": t.tolist(),
         "fovDeg": fov_deg,
@@ -184,7 +296,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": "not-found"})
 
     def do_POST(self):
-        if self.path != "/calibrate-placement":
+        if self.path not in ("/calibrate-placement", "/detect-references"):
             self._send_json(404, {"error": "not-found"})
             return
 
@@ -201,7 +313,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         try:
-            result = calibrate_placement(payload)
+            result = detect_six(payload) if self.path == "/detect-references" else calibrate_placement(payload)
         except ResectionError as err:
             self._send_json(422, {"error": "resection-failed", "message": str(err)})
             return
@@ -221,3 +333,4 @@ if __name__ == "__main__":
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"pergolando-geocalib-service listening on :{PORT}")
     server.serve_forever()
+

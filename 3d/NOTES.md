@@ -209,7 +209,7 @@ sopra, ancora attuale per quelli non ancora migrati)
 | `Telo` | rimappaggio proporzionale: fit lineare `local_y = a*local_z+b` sui dati originali, poi per ogni vertice si preserva il **residuo** rispetto alla retta e si ricalcola sulla nuova retta/nuova estensione — per non perdere le pieghe/dettagli del telo originale | Deve restare **sotto la guida**, nello spazio tra guida e frangitratta (offset negativo rispetto alla retta guida, non sopra) |
 | `Aggancio_Parete` / `.002` | bracket per variante a parete; stessa logica di shift di `Trave_Posteriore` (X, altezza, profondità) | Sostituita almeno una volta con mesh più dettagliata da `aggancio_parete.fbx` — solo riposizionamento, nessuna logica nuova |
 | `Timpano` + `Trave_Laterale` | pannello di chiusura laterale opzionale (solo se la pergola è "chiusa"); il bordo superiore deve restare parallelo alla guida | **Tecnica corretta** (validata da Davide): NON forzare ogni vertice sulla retta della guida (appiattisce lo spessore/profilo alluminio) — invece **traslare rigidamente l'intero gruppo di vertici superiori di un'estremità** (es. l'angolo fronte) lungo l'asse Z, mantenendo fissa l'altra estremità, fino a far coincidere la distanza dal bordo guida **nei due vertici più esterni** (fronte e retro), non nella media del gruppo |
-| `Pilastrino_intermedio`, `Skipper` | introdotti in `flag4.fbx`, **non ancora spiegati/lavorati** | Tenuti nascosti in scena, in attesa |
+| `Pilastrino_intermedio`, `Skipper` | introdotti in `flag4.fbx`; **chiarito 2026-10-03**: entrambi allo stesso spigolo di `Montante`/`Guida` (non al centro) — quasi certamente geometria del prodotto "Skipper" (non incluso in questo bundle) rimasta mescolata nell'FBX | Tenuti nascosti in scena |
 
 ## Pendenza reale della guida (da ricalcolare sempre, mai assumere)
 
@@ -633,6 +633,490 @@ render diretto, nessun grafo compositor custom — esattamente l'Alpha pass dell
 niente altro. Verificato: alpha extrema (0,255), sagoma pixel-esatta confrontata su sfondo
 magenta di prova.
 
+### Crash di `pergolando-geocalib-service` su foto reale ad alta risoluzione (2026-10-03)
+
+Primo vero test con una foto scattata da telefono (4096×3072, 12,6MP — `3d/test_photos/
+test_02/sfondo.jpg`), tramite il wizard reale (non più uno script one-shot): il servizio
+**crashava con un'access violation nativa** (`exit code 3221225477` = `0xC0000005`),
+nessun traceback Python, il processo moriva e basta — tutti i test precedenti avevano
+usato foto piccole (640×480), mai una vera foto da fotocamera.
+
+**Causa reale, riprodotta fuori dal server** (`test_crash_repro.py`, poi cancellato):
+il preprocessing interno di GeoCalib (kornia, `gaussian_blur2d` prima del resize — un
+anti-aliasing filter) alloca un buffer proporzionale alla risoluzione di **input**, non a
+quella target — su un'immagine da 12,6MP, ~384MB per un singolo tensore intermedio.
+Fuori dal server questo dà un pulito `RuntimeError: not enough memory`; **dentro il
+server HTTP persistente la stessa condizione di memoria esaurita si manifesta come
+access violation nativa** (probabilmente per via della memoria già impegnata dal modello
+caricato una volta sola all'avvio + più thread, più frammentazione — non indagato oltre,
+non necessario avendo trovato la causa a monte).
+
+**Fix**: `calibrate_placement` ora ridimensiona l'immagine (PIL, lato massimo 1600px,
+preservando l'aspect ratio) **prima** di passarla a GeoCalib — la calibrazione camera non
+ha bisogno di dettaglio fine. Bonus nello stesso punto di codice: `ImageOps.exif_transpose`
+per correggere l'orientamento di foto scattate in verticale da telefono (l'orientamento
+Exif non applicato ai pixel grezzi avrebbe rotto la stima di gravità in modo silenzioso —
+non ancora capitato con una foto reale, ma un rischio concreto ora che il flusso riceve
+foto vere da telefono, quindi corretto preventivamente). `punti` restano normalizzati
+(xNorm/yNorm) quindi tutto il resto (resection, `tettoNormalizzato`) resta coerente
+qualunque sia la risoluzione effettivamente caricata — verificato: lo stesso script di
+riproduzione, identico payload, ora restituisce una posa valida invece di crashare.
+
+### Crash di Blender su chiamate ripetute reali — addon di terze parti + processo zombie (2026-10-03)
+
+Stesso test dal vivo: dopo il fix del crash GeoCalib, il passo successivo (render 3D)
+falliva con "bad allocation" durante il caricamento della config OpenColorIO, oppure
+restava bloccato. Causa reale, in due parti:
+1. Un vecchio processo Blender rimasto **zombie** da un crash precedente (verificato via
+   PowerShell, poi terminato con `Stop-Process`) — occupava memoria/lock inutilmente.
+2. **Ogni singola invocazione** headless caricava comunque gli addon utente installati
+   su questa macchina: `bonsai` (incompatibile con la versione Python di questo Blender,
+   errore ad ogni avvio) e `BlenderKit` (lancia un proprio processo client in background
+   ad ogni avvio) — overhead reale e non necessario per un rendering headless scriptato.
+
+**Fix**: aggiunto `--factory-startup` agli argomenti CLI in
+`pergolando-blender-service/server.js` (subito dopo `--background`) — salta il
+caricamento di userpref/addon di terze parti, lasciando solo gli addon core. Verificato:
+chiamate ripetute ora stabili, nessun processo Blender residuo dopo la risposta HTTP.
+
+### deltaH (H1) mai realmente inviato al render (2026-10-03)
+
+Davide ha selezionato Δh=80 nel wizard reale, ma il render mostrava visivamente qualcosa
+più vicino a 60 e basta — non un errore di percezione: `wizard/page.tsx` calcolava un
+`deltaHCmStimato` (una stima segnaposto, 12% della sporgenza, già documentata come tale
+in un commento preesistente nel codice) e lo usava al posto del vero campo H1 raccolto
+dal form (`altezzaInclinazione`), sia per `/catalog/render3d` che per `/catalog/
+render-finale`. **Fix**: entrambe le chiamate ora inviano `deltaHCm: Number(altezzaInclinazione)`
+— il valore reale scelto dal venditore, non più una stima.
+
+### Colore selezionato dal venditore non applicato al render 3D (2026-10-03)
+
+Davide aveva selezionato bianco, il render mostrava un grigio scuro uniforme: il modello
+3D non riceveva **nessuna** informazione di colore — ogni chiamata a `/catalog/render3d`
+girava sempre nella modalità "silhouette" grigia di debug, indipendentemente da cosa
+l'utente avesse scelto nel catalogo.
+
+**Fix** (frontend → DTO → service → Blender):
+- `wizard/page.tsx`: aggiunte `coloreStruttura`/`colorePlastica` al body POST di
+  `/catalog/render3d` (le stringhe catalogo già disponibili, es. "RAL 9016 Bianco").
+- `render-scene3d.dto.ts`: due nuovi campi opzionali `@IsString()`, con nota che restano
+  `undefined` per le viste isolate di riferimento di `render-finale` (che devono restare
+  grigie neutre — Gemini riceve il colore via prompt testuale, non via immagine).
+- `scene3d.service.ts`: nuova `RAL_COLORS` (tabella RGB approssimata, solo i codici che
+  compaiono davvero nel catalogo bundle `Flag`, letto da `catalog/database.json`) +
+  `colorStringToRgb()` (regex sul codice RAL a 4 cifre, poi match per nome "antracite",
+  poi grigio neutro di fallback) — passati a `generate_flag.py` come `outputMode:
+  'colored'`, `colorRgb`, `frangitrattaRgb` (quest'ultimo per le parti in plastica/
+  Frangitratta — confermato dal campo `prodotto.colori.parti_plastiche.tag` = "Colore
+  frangitratta" nel catalogo reale, non un'ipotesi).
+- Bug collaterale trovato e corretto nello stesso punto: un commento JSDoc conteneva
+  `Flag/*/catalog/` — il `*/` letterale chiudeva il blocco di commento in anticipo,
+  causando una cascata di ~12 errori TypeScript nei file successivi. Risolto riformulando
+  il commento per evitare quella sottostringa.
+
+### Payload di `render-finale` troppo grande, nessuna traccia nei log backend (2026-10-03)
+
+Ultimo passo del test dal vivo: "Si è verificato un errore nella generazione dell'immagine
+finale. Riprova." — ma `preview_logs` sul backend non mostrava **nessuna** richiesta
+arrivata a `/catalog/render-finale` (solo la precedente `/catalog/render3d`, riuscita).
+Puntava a un fallimento lato client, prima che la richiesta partisse davvero.
+
+**Riprodotto isolatamente** (harness HTML servito via `python -m http.server`, foto reale
+`sfondo.jpg` 4096×3072 + overlay colorato): la vecchia `compositeImages` disegnava il
+composito alla risoluzione PIENA della foto originale e lo codificava **PNG** — risultato,
+un data URL da **~27MB**. Causa a monte confermata leggendo `pergolando-backend/src/
+main.ts`: `app.useBodyParser('json', { limit: '15mb' })` — il body totale (composito
+~27MB + `fotoAmbienteBase64` a piena risoluzione, altri ~4MB) superava il limite e veniva
+rifiutato silenziosamente prima di arrivare a qualunque punto che lo loggasse.
+
+**Fix** (`pergolando-frontend/src/lib/image-compose.ts`): stessa strategia già usata per
+GeoCalib — ridimensionare prima di codificare. Aggiunto `MAX_DIMENSION_PX = 1600` e una
+nuova `downscaleDataUrl()` esportata; `compositeImages` ora disegna a risoluzione limitata
+e codifica **JPEG qualità 0.9** invece di PNG a piena risoluzione (è sempre una foto
+appiattita, senza trasparenza da preservare). `wizard/page.tsx` → `handleGeneraFinale` usa
+`downscaleDataUrl(fotoAmbiente)` per `fotoAmbienteBase64`, in parallelo al composito.
+
+**Verificato**: stesso harness isolato, stessa foto reale — il payload totale scende da
+~27MB a **1.26MB**, ben sotto il limite di 15MB. `npm run typecheck` e `npm run lint` sul
+frontend entrambi puliti dopo il fix.
+
+### Multi-guida (2/3/4 guide) + export del set di immagini ComfyUI con nomenclatura fissa (2026-10-03)
+
+Due richieste dirette di Davide dopo il test dal vivo, affrontate insieme:
+
+**1) Nomenclatura fissa per il set di riferimento ComfyUI**, concordata il 2026-09-30 ma
+mai davvero collegata al codice: `01_original.jpg`, `02_lineart.png`, `03_depth.png`,
+`04_mask.png`, `05_beauty.png` (+ `06_material_id.png`, aggiunto dopo). Fino ad oggi
+`generate_flag.py` scriveva sempre su un path temporaneo casuale
+(`pergolando-blender-service/server.js`, `${randomUUID()}.png`) — nessun punto del sistema
+salvava mai questi file con un nome "parlante". **Nuovo script standalone**
+`3d/export_reference_set.py` (Python puro, gira FUORI da Blender — orchestratore via
+`subprocess`, stesso pattern di invocazione CLI di `pergolando-blender-service/server.js`:
+`--background --factory-startup flag.blend --python generate_flag.py -- --config-json ...
+--output ...`): dato un config JSON (stesso shape del generatore) + opzionalmente una foto
+reale e una camera (stesso shape PnP del wizard), produce l'intero set numerato in una
+cartella di output, con la stessa camera condivisa fra tutte le modalità così il set resta
+allineato pixel-per-pixel. Deliberatamente non collegato al flusso live del wizard/backend
+— è uno strumento offline per preparare i riferimenti ComfyUI, eseguibile da terminale.
+Verificato end-to-end con la foto reale `sfondo.jpg` e L=800 (3 guide): 6 file prodotti,
+nessun errore.
+
+**2) Multi-guida reale (2/3/4 guide)**: Davide aveva selezionato "Flag 3 guide" nel wizard
+(L=550, che però è già al limite della fascia 2 guide — vedi sotto) e il render ignorava
+comunque la scelta, generando sempre la variante a 2 guide — bug di wiring **and** gap di
+modellazione, risolti insieme:
+
+- **Dato reale di catalogo** (`apps/studio/storage/bundles/Flag/*/catalog/database.json`,
+  `sotto_modelli.flag.varianti_montaggio`): "2guide" copre L 200-550cm, "3guide" L
+  600-1100cm, "4guide" L 1150-1400cm (1400 è anche l'`L_max_modulo_cm` assoluto del
+  prodotto — **non esiste una variante "5 guide"** nel listino reale). I due intervalli
+  551-599 e 1101-1149 sono vuoti per davvero: il listino stesso non vende quelle larghezze
+  (`note_estrazione`).
+- **Nessun pezzo del modello rappresenta davvero una guida/pilastro centrale** — ipotesi
+  iniziale che `Pilastrino_intermedio` fosse quel pezzo, smentita (vedi sopra, sezione
+  "Rimasto in sospeso"): non esiste nell'FBX reverse-engineered un asset dedicato per
+  l'hardware delle guide intermedie. **Approccio adottato, esplicitamente un'approssimazione
+  non verificata contro l'hardware reale**: `Guida`/`Supporto` (i due pezzi che già
+  rappresentano una guida sui bordi) vengono duplicati per traslazione pura (non mirror —
+  nessuna ragione nota per assumere che una guida centrale sia "specchiata" come quella di
+  bordo) alle posizioni intermedie, evenly-spaced sull'intera larghezza: `n_guide=3` aggiunge
+  una guida al centro, `n_guide=4` aggiunge due guide ai punti a 1/4 e 3/4. Nessuna gamba
+  (`Montante`) o pilastro aggiuntivo per le guide centrali: `Trave`/`Telo` sono già pezzi
+  continui su tutta la L, e il listino prezza "Guida aggiuntiva" come accessorio a sé
+  (indicizzato solo per sporgenza), non come un set gamba+guida — coerente con l'assenza di
+  supporto verticale dedicato.
+- Nuove funzioni in `generate_flag.py`: `derive_n_guide_from_l(L_cm)` (soglie sopra,
+  arrotonda per eccesso nei due gap vuoti — più struttura, mai meno), `guide_x_targets(L_cm,
+  n_guide)`, `_translate_x_copy`/`_remove_stale_copies` (stesso pattern difensivo di
+  pulizia-e-ricostruzione già usato per i Frangitratta intermedi), `nGuide` opzionale nel
+  config (`cfg["nGuide"]`, altrimenti derivato da `L_cm`). **Verificato**: soglie corrette su
+  9 punti di L (200→1400), posizioni calcolate corrette, render reale a L=1300/n_guide=4
+  (4 guide visibili, telo diviso in 3 pannelli) e regressione a L=300/n_guide=2 di default
+  (identico all'architettura originale, nessuna guida intermedia spuria).
+- **Wiring reale** (il bug che Davide aveva effettivamente segnalato): il wizard raccoglie
+  già la scelta del venditore in `varianteKey` (`"2guide"`/`"3guide"`/`"4guide"`, le stesse
+  chiavi del catalogo) ma non la mandava mai a `/catalog/render3d`. Aggiunto
+  `varianteMontaggio` (stesso valore grezzo di catalogo, stesso pattern di
+  `coloreStruttura`/`colorePlastica`) a `RenderScene3dDto`, risolto in `Scene3dService` via
+  `varianteMontaggioToNGuide()` (regex `^(\d+)guide$` sulla chiave — il numero È già nella
+  chiave, nessuna tabella di lookup separata), passato come `nGuide` a
+  `pergolando-blender-service`. Propagato anche a `RenderFinaleService`'s tre viste isolate
+  per Gemini (prima sempre a 2 guide indipendentemente da cosa stesse configurando il
+  venditore).
+
+### Lineart via Grease Pencil Line Art Modifier (sostituisce Freestyle per il set ComfyUI) + split structure/roof + risoluzione 2560x1920 (2026-10-04)
+
+Davide ha fornito le impostazioni esatte per un secondo tentativo di lineart, dopo aver
+notato che la versione Freestyle (`render_freestyle`) produceva "quella grossa superficie
+nera sotto la copertura" — non voluta. Tecnica sostituita interamente: **Grease Pencil +
+modificatore Line Art** invece del motore Freestyle, nuova funzione `render_lineart_gp` in
+`generate_flag.py` (non ha toccato/rimosso `render_freestyle`, ancora usata dalle viste
+`ortho_*`). Impostazioni usate, esattamente come richiesto: `use_crease=True` (soglia
+130°, nel mezzo del range 120-140° indicato), `use_contour=True` (silhouette),
+`use_material=False` (material boundary), `use_intersection=True` (serve a distinguere
+Telo/Frangitratta — altrimenti si fondono in un unico contorno), `use_loose=False`,
+`use_edge_overlap=False`, righe molto sottili (`radius=0.012`, niente fill: solo stroke).
+
+**Due comportamenti reali di Blender 5.2 scoperti solo per tentativi** (nessuna
+documentazione ufficiale chiara in merito, trovati ispezionando il depsgraph valutato):
+1. Il modificatore `LINEART` ha `target_layer`/`target_material` **entrambi vuoti di
+   default** — senza impostarli esplicitamente a un layer/materiale che esistono
+   davvero sull'oggetto Grease Pencil, il modificatore genera **zero stroke**, in
+   silenzio, nessun errore. Verificato: 0 stroke prima del fix, 1457 stroke/12730 punti
+   dopo aver impostato entrambi.
+2. `hide_render=True` sui mesh sorgente (invece di assegnargli un materiale Holdout) fa
+   sì che Line Art **non li legga affatto** — legge la geometria dallo stesso depsgraph
+   costruito per il render finale, e un oggetto `hide_render` non vi entra proprio.
+   Riconfermata quindi la stessa tecnica già usata da `render_freestyle`: materiale
+   Holdout su tutti i mesh sorgente (li rende "presenti" per Line Art, trasparenti nel
+   Combined finale), **mai** `hide_render` per nasconderli.
+
+**Due nuove viste parziali** (richieste esplicitamente da Davide, nomi suoi, senza
+prefisso numerico a differenza di `01_`-`06_`): `structure_lineart.png` (solo
+`Montante*`+`Trave*`+`Guida*` — montanti, travi, guide, incluse le eventuali guide
+intermedie multi-guida) e `roof_lineart.png` (solo `Frangitratta*`+`Telo` — non
+`Tettuccio`, non richiesto). Implementate passando un `object_filter` (lista di prefissi
+nome) a `render_lineart_gp`: quando dato, crea una collection temporanea con solo gli
+oggetti che matchano (un oggetto può appartenere a più collection contemporaneamente,
+nessun impatto sulla struttura reale della scena) e nasconde dal render (`hide_render`,
+stavolta sì — per tutti gli oggetti ESCLUSI dal filtro, va bene, non devono essere letti
+da Line Art) tutto il resto. Verificato visivamente: `structure_lineart.png` mostra
+correttamente 2 montanti + travi + 3 guide (L=800, n_guide auto=3); `roof_lineart.png`
+mostra il profilo del Telo + i tick dei Frangitratta lungo il bordo frontale.
+
+**Risoluzione** di tutte le viste "documentazione" (camera orbitale di default, usata da
+`depth`/`lineart`/`lineart_structure`/`lineart_roof`/`mask`/`material_id`/`colored` quando
+non c'è una foto reale da combaciare) alzata da 1280x960 a **2560x1920**, su richiesta
+esplicita di Davide. Non tocca la risoluzione delle viste che combaciano una foto reale
+(`camera` nel config) — quelle seguono sempre `imageWidthPx`/`imageHeightPx` della foto,
+giustamente indipendente da questa modifica.
+
+`3d/export_reference_set.py` aggiornato: `02_lineart.png` ora usa `outputMode: "lineart"`
+(non più `"freestyle"`), aggiunti `structure_lineart.png`/`roof_lineart.png` alla lista
+`MODES`. **Bug reale trovato e corretto nello stesso giro**: lo script passava
+`--output-dir`/`--flag-blend`/`--generate-script` così come ricevuti da riga di comando,
+spesso path RELATIVI — Blender risolve un `scene.render.filepath` relativo in modo
+imprevedibile su Windows (un run con `--output-dir "3d/test_photos/..."` dalla cwd giusta
+è finito scritto su `C:\3d\test_photos\...`, un drive completamente diverso — solo la
+copia di `01_original.jpg`, fatta via PIL e non da Blender, rispettava la cwd
+correttamente). Fix: `output_dir`/`flag_blend`/`generate_script` vengono risolti a path
+assoluti (`Path(...).resolve()`) prima di essere passati a Blender. Verificato: rigenerato
+l'intero set di riferimento in `3d/test_photos/test_02/reference_set/` (foto reale
+`sfondo.jpg`, L=800/n_guide=3), tutti e 8 i file nel posto giusto, tutti i render a
+2560x1920.
+
+### Montante sotto ogni guida intermedia + lineart più sottile + set rigenerato con la prospettiva reale (2026-10-04, stessa giornata)
+
+Tre correzioni rapide sul lavoro appena sopra, tutte da Davide dopo aver visto i primi
+risultati:
+
+1. **Guida intermedia senza supporto verticale — gap reale, non solo estetico.** L'
+   assunzione "Trave/Telo sono già continui, non serve una gamba in più" (vedi sezione
+   Multi-guida sopra) era sbagliata: una guida centrale ha bisogno del proprio montante
+   verticale a terra, esattamente come le due di bordo. Fix in `build_montante`
+   (`generate_flag.py`): stesso pattern già usato per `Guida`/`Supporto` —
+   `_translate_x_copy` del `Montante` di bordo (già alla quota/profondità corrette) sulle
+   stesse posizioni intermedie di `guide_x_targets`, oggetti `Montante_intermedio_N`.
+   Verificato: regressione a L=300/n_guide=2 identica a prima (nessuna gamba spuria),
+   L=800/n_guide=3 mostra correttamente il montante centrale sotto la guida di mezzo.
+   Montante_Posteriore (gambe posteriori, solo rilevanti in modalità autoportante, oggi
+   mai visibili nel caso "parete" che Davide sta testando) **non** è stato esteso allo
+   stesso modo — lasciato come gap noto per quando/se servirà davvero l'autoportante
+   multi-guida.
+2. **Spessore lineart ridotto**: il default di `render_lineart_gp`'s `line_radius` era
+   0.012 (scelto nel primo giro per garantire alpha pieno, vedi sezione sopra) — Davide lo
+   ha trovato troppo spesso. Confrontati 0.004/0.006/0.008/0.012 fianco a fianco (crop
+   zoomati): 0.004 torna ad essere grigio/antialiased (stesso problema del default
+   originale 0.0025), 0.008 resta nero pieno e nitido ma visibilmente più sottile di
+   0.012. Nuovo default: **0.008**.
+3. **Prospettiva reale, non quella orbitale di debug.** Richiesta esplicita: il set deve
+   combaciare con la foto vera di `test_photos/test_02`, nella stessa calibrazione che
+   Davide aveva impostato lui nel wizard (tap dei punti sul muro/pavimento reale) — non
+   un'angolazione isometrica sintetica. Il problema: quella posa (rvec/tvec/fovDeg) non
+   viene mai salvata su disco da nessuna parte — vive solo nello state React del wizard e
+   viene mandata al backend una tantum. **Recuperata aggiungendo un log temporaneo**
+   (`this.logger.warn(...)`) in `Scene3dService.render()` che stampa `dto.camera` — chiesto
+   a Davide di ricliccare "Genera anteprima 3D" (non serviva ritoccare i punti: lo state
+   React persisteva già la posa calcolata), letta la posa dal log del backend dev server
+   (`preview_logs`), poi **rimosso subito** il log temporaneo (non è mai stato pensato per
+   restare — nessun altro punto di questo service logga il body delle richieste). Valori
+   reali catturati: `L_cm=710, P_cm=500, H_cm=300, deltaH_cm=80`,
+   `rvec=[-0.177, -0.483, 0.044], tvec=[435.6, 393.2, 1107.5], fovDeg=67.77,
+   1600x1200`. Salvati in `3d/test_photos/test_02/config.json` e `camera.json` per
+   riuso. **Verificato**: composito manuale lineart+foto reale (`PIL.Image.
+   alpha_composite`) — il contorno della pergola segue esattamente la linea di gronda del
+   negozio nella foto, coerente con un montaggio a parete in quel punto preciso.
+
+Set finale rigenerato in `3d/test_photos/test_02/reference_set/` con la prospettiva reale:
+`01_original.jpg` (foto originale, non ridimensionata) + 6 render a 1600x1200 (la
+risoluzione della foto, non più 2560x1920 — quando c'è `camera` nel config si segue sempre
+`imageWidthPx`/`imageHeightPx`, mai la risoluzione "documentazione"). `05_beauty.png`
+rimosso su richiesta (non serve), `material_id` rinumerato da `06` a `05` dato che lo slot
+si è liberato — `render_colored` resta intatto in `generate_flag.py`, solo
+`export_reference_set.py` non lo richiama più.
+
+### Bug reale: H (altezza a parete) usata come se fosse P (altezza fronte) — fix in Scene3dService (2026-10-04)
+
+Davide, guardando l'anteprima con H=300/H1=80: "H, i trecento, è l'altezza a parete... con
+delta 80 davanti dovrebbero essere 220cm" — e aveva ragione. Il campo del wizard è
+letteralmente etichettato **"Altezza a parete H (cm)"** (`wizard.altezza` in `i18n.tsx`) —
+cioè l'altezza REALE del fissaggio a muro (vendor "H"), non quella del fronte. Ma
+`Scene3dService.render()` lo passava TALE E QUALE come `H_cm` a `generate_flag.py`, il
+quale — per il proprio docstring/convenzione interna — tratta `H_cm` come l'altezza del
+FRONTE (vendor "P"), calcolando il retro come `H_cm + deltaH_cm`. Risultato: con
+H=300/H1=80 il fronte veniva renderizzato a 300cm (dovrebbe essere 220) e il retro a 380cm
+(dovrebbe essere esattamente 300, il vero valore H che l'utente ha inserito, invariato).
+
+**Verificato NON essere un problema del configuratore prezzi**: `buildConfiguraPayload()`
+nel wizard manda la STESSA variabile `altezza` come `altezzaMontantiCm` al motore prezzi —
+che la usa in modo interno coerente con se stesso (soglie di sovrapprezzo sul catalogo),
+indipendentemente dal fatto che sia "H" o "P" in senso assoluto. Il bug è isolato al path
+3D (`Scene3dService` → `generate_flag.py`), non tocca il preventivo.
+
+**Fix**: in `Scene3dService.render()`, `H_cm: dto.altezzaCm - dto.deltaHCm` invece di
+`H_cm: dto.altezzaCm` — `generate_flag.py` stesso resta intoccato (la sua convenzione
+interna H_cm=fronte è autoconsistente e usata da più chiamanti, cambiarla lì avrebbe un
+raggio d'azione molto più ampio). Doc del campo `altezzaCm` in `RenderScene3dDto`
+aggiornata per spiegare esplicitamente la differenza H-vendor vs H_cm-script, proprio per
+evitare che questa confusione si ripresenti. **Verificato**: render con H=300/H1=80 ora
+mostra il fronte a 220cm — visivamente il bordo anteriore della pergola si allinea con la
+vera tettoia del negozio nella foto di test, invece di scendere ben oltre come prima.
+
+### Prompt render-finale: Gemini "completa" una tenda preesistente nella foto (2026-10-04)
+
+Primo test manuale di Davide con l'anteprima corretta (220cm) + il prompt rafforzato
+(arredo/ombre, sezione precedente): risultato "molto meglio", MA Gemini ha esteso/riverniciato
+di bianco una tenda da sole scura già presente (chiusa/arrotolata) nella foto originale,
+facendola assomigliare alla nuova pergola — non richiesto, non voluto. Causa probabile:
+nessuna riga del prompt diceva esplicitamente di NON toccare altre strutture di ombreggiamento
+già presenti nella foto — "tutto il resto della foto deve restare invariato" c'era già, ma
+troppo generico per competere con l'enorme dettaglio costruttivo dedicato alla pergola NUOVA,
+che probabilmente spinge il modello a "armonizzare" ogni elemento simile che vede in scena.
+
+Due fix in `prompt.ts`, entrambi su suggerimento diretto di Davide:
+1. **Nuovo vincolo esplicito** in `buildCompositePrompt`: la pergola descritta è l'UNICA
+   struttura di ombreggiamento da aggiungere/modificare; qualunque tenda/tettoia/veranda/
+   braccio avvolgibile già presente (anche chiuso) deve restare ESATTAMENTE come nella foto
+   originale — niente estensione, riverniciatura, "completamento" stilistico.
+2. **Rimossa la riga con le misure testuali** ("Dimensioni richieste dal cliente: larghezza
+   ... cm") da `buildCompositePrompt` — ipotesi di Davide: per il composito (a differenza
+   del render isolato `buildRenderPrompt`, che non ha alcuna immagine di riferimento per le
+   dimensioni e quindi le tiene) la sagoma grigia nell'immagine (2) è GIÀ la fonte di verità
+   geometrica assoluta; ripetere le misure in testo è ridondante nella migliore delle ipotesi,
+   nella peggiore dà al modello una seconda fonte "di verità" indipendente da riconciliare con
+   le immagini — puro rischio, nessun beneficio. `structuralChecklist()` ha ora un parametro
+   `includeDimensioni` (default `true`, usato da `buildRenderPrompt` che ne ha ancora
+   bisogno; `buildCompositePrompt` passa `false`).
+
+Non ancora riverificato con un vero retest end-to-end (Davide sta provando manualmente i
+prompt scaricati, non tramite il pulsante del wizard) — da confermare se risolve davvero il
+problema della tenda prima di considerarlo chiuso.
+
+### Cycles → Eevee per lineart/material_id: stesso risultato, ~4-7x più veloce (2026-10-04)
+
+Davide ha notato i tempi di `export_reference_set.py` ("Blender che ci mette così tanto
+tempo") — causa reale: `render_lineart_gp` e `render_material_id` giravano su **Cycles**
+(path-tracing) senza alcun bisogno: il primo è solo stroke Grease Pencil piatti (nessuna
+luce/materiale da risolvere), il secondo colori Emission piatti (idem) — nessuno dei due ha
+bisogno di illuminazione ray-traced. Cambiato entrambi a **`BLENDER_EEVEE`** (rasterizzatore
+in tempo reale). `render_colored` (la "beauty", riflessi metallici + HDRI) resta su Cycles,
+lì il ray tracing serve davvero.
+
+**Misurato** (stessa foto/camera reale, 1600x1200): lineart 26.7s → 7.0s, material_id non
+misurato isolatamente ma analogo (~4s). Set completo di 7 file: 30.7s totali (prima, con
+entrambi su Cycles, sensibilmente più lungo). **Verificato pixel-per-pixel**: stesso alpha
+bbox/extrema su lineart; colori di material_id leggermente "smorzati" rispetto a RGB puro
+(es. rosso ≈(218,56,32) invece di (255,0,0)) ma confermato che questo tonemapping (color
+management della scena, AgX probabilmente) c'era IDENTICO già con Cycles prima del cambio —
+non è una regressione introdotta oggi.
+
+Nota: questa ottimizzazione riguarda solo `export_reference_set.py` (tool offline) — il
+path live del wizard (`render3d`/`render-finale`, via `Scene3dService`) non usa mai
+`outputMode: "lineart"` o `"material_id"`, quindi non è toccato da questo fix. Se in futuro
+anche l'anteprima dal vivo (modalità "colored", oggi Cycles 128 campioni, ~27s) risultasse
+troppo lenta, EEVEE con screen-space reflections potrebbe essere un compromesso qualità/
+velocità da valutare — non fatto ora, non richiesto.
+
+### `render_colored` → Eevee (anche per l'anteprima dal vivo), shadow catcher Eevee NON supportato, ibrido Cycles accantonato, materiali ritoccati (2026-10-04)
+
+Seguito diretto della sezione sopra. Davide ha chiesto se Eevee supporta anche i piani
+shadow catcher (per poter velocizzare pure lo scatto "documentazione" con pavimento/muro).
+**Verificato empiricamente con un test isolato (cubo + piano + `is_shadow_catcher=True`)**:
+la proprietà esiste anche su Eevee e si imposta senza errori, ma **non ha alcun effetto** —
+il piano viene renderizzato comunque come superficie opaca piena, non trasparente-tranne-
+l'ombra. Provato anche `scene.eevee.use_raytracing=True`: stesso risultato (solo molto più
+lento). Shadow catcher resta una funzione esclusiva di Cycles su questo Blender (5.2.2).
+
+**Scoperta chiave nel frattempo**: il path REALE del wizard (`Scene3dService` →
+`outputMode: "colored"`) chiama sempre `includeBackdrop: false` — cioè **non usa mai un
+piano shadow catcher**, è solo la pergola metallica su sfondo trasparente (la foto reale
+fornisce già pavimento/ombre). Questo significa che per il caso che conta davvero (il
+pulsante "Genera anteprima 3D" e i nuovi pulsanti di regolazione fine) **Eevee puro, senza
+alcun ibrido, è già sufficiente** — nessun piano da preoccuparsi.
+
+Prototipato comunque un vero **ibrido Eevee+Cycles** su suggerimento di Davide (pergola su
+Eevee, passata separata SOLO per l'ombra su Cycles con la pergola resa `Holdout` —
+invisibile ma proietta ombra, stessa tecnica già usata per Freestyle/Line Art — composte
+tramite il compositor nativo di Blender, niente libreria immagini esterna visto che
+`pergolando-blender-service` è volutamente senza dipendenze) — **funzionante e verificato**,
+ma poi **accantonato su richiesta esplicita di Davide** ("lascia pure perdere l'ibrido"):
+la passata ombra-con-Holdout a 64 campioni/denoise era quasi lenta quanto il render singolo
+originale (27s) — il vero collo di bottiglia non era il materiale metallico ma
+samples+denoising insieme; a campioni bassi senza denoise scende a ~1-5s, ma vista
+l'assenza di qualunque chiamante reale per `includeBackdrop=True` oggi, la complessità
+aggiuntiva non è stata ritenuta utile per ora. Tecnica lasciata documentata qui nel caso
+serva in futuro.
+
+**Fix applicato**: `render_colored` ora usa sempre `BLENDER_EEVEE` (+`use_raytracing=True`
+per riflessi reali sul metallico) — **nessun branch condizionale sul motore**. Per
+`includeBackdrop=True` questo significa che lo shadow catcher silenziosamente NON funziona
+più (il piano torna visibile come superficie opaca) — accettabile perché quel path non è
+chiamato da nessuna parte oggi; se tornasse in uso, va deciso se riprendere l'ibrido
+accantonato o tenere quel caso specifico su Cycles. **Misurato sulla scena reale**: 26.7s
+(Cycles) → **4.4-4.8s** (Eevee), ~5.6x più veloce — impatta direttamente i nuovi pulsanti di
+regolazione fine (ogni click rigenera il render).
+
+**Materiali ritoccati** (richiesta diretta di Davide, prima approssimazione da affinare):
+struttura (alluminio) `Roughness` 0.3 → **0.15** (più lucido/metallico); telo `Metallic`
+reso esplicito a 0 e `Roughness` 0.75 → **0.95** (completamente opaco, nessun riflesso — deve
+leggersi come tessuto, non come la struttura verniciata).
+
+### Fix lente d'ingrandimento: drag nativo del browser in conflitto col tracking + nuovo modello hover-segui/click-conferma (2026-10-04)
+
+Davide: la lente "fa un cerchio nero, poi se muovo leggermente il mouse va in tilt, perde
+l'effetto — dovrebbe seguire il mouse finché non si riclicca per confermare il punto".
+
+**Causa probabile del "va in tilt"**: l'elemento `<img>` del wizard non aveva
+`draggable={false}` — su desktop, un mousedown seguito da un piccolo movimento avvia il
+**drag nativo dell'immagine del browser** invece di continuare i normali pointer event,
+andando in conflitto con il tracking di React. Fix: `draggable={false}` +
+`onDragStart={(e) => e.preventDefault()}` su `PosizionamentoPergola.tsx`'s `<img>`.
+
+**Modello di interazione ridisegnato** per corrispondere esattamente alla richiesta: la
+lente ora segue il puntatore in continuo al semplice hover (non serve più tenere premuto)
+e un click conferma il punto mostrato in quel momento — tolto il guard `!magnifier` da
+`handlePuntoPointerMove` che prima limitava l'aggiornamento al solo trascinamento attivo.
+Su touch (dove l'hover non esiste) il comportamento resta identico a prima — press-move-
+release — dato che `pointermove` su touch scatta comunque solo col dito a contatto.
+Aggiunto `onPointerLeave` per nascondere la lente quando il cursore esce dalla foto (solo
+nella fase hover-mouse: con `setPointerCapture` attivo durante un trascinamento touch,
+`pointerleave` non scatta per l'elemento che ha catturato il puntatore).
+
+Non ancora verificato dal vivo da Davide (solo typecheck/lint puliti) — da confermare al
+prossimo test nel wizard.
+
+### Accesso da remoto via Tailscale, bug lente su mobile, roughness + lag (2026-10-05, test dal vivo da telefono)
+
+Davide ha testato il wizard dal telefono (fuori casa, PC acceso) tramite **Tailscale**, già
+attivo su questa macchina e sul suo telefono (stessa tailnet: `davide2`, `nas`,
+`z-flip6-di-davide`) — nessuna configurazione nuova necessaria, bastava l'IP Tailscale del
+PC (`100.83.13.118`) al posto dell'IP LAN. Due fix di configurazione locale (entrambi in
+file `.env*`, non committati, mai nel repo):
+- `pergolando-frontend/src/lib/api.ts`: l'URL del backend non è più una const letta una
+  volta a livello di modulo da `NEXT_PUBLIC_API_URL` (hardcoded nel `.env.local` all'IP
+  LAN) — ora `resolveApiBaseUrl()` deriva l'host dal `window.location.hostname` della
+  pagina stessa quando la env var non è impostata, quindi funziona automaticamente da LAN,
+  Tailscale o localhost senza dover più toccare la config. `.env.local`'s
+  `NEXT_PUBLIC_API_URL` commentata.
+- `pergolando-backend/.env`: `CORS_ORIGIN` esteso con l'origine Tailscale
+  (`http://100.83.13.118:3000`) accanto a quelle già presenti.
+
+Due bug reali trovati SOLO testando da un telefono vero (mai visti testando da desktop):
+1. **Menu contestuale nativo Android/iOS sulla foto**: una pressione lunga (esattamente il
+   gesto per posizionare un punto con la lente) apriva il menu "salva immagine/Copilot/
+   cerca con..." del sistema invece di raggiungere il componente. Fix:
+   `onContextMenu={(e) => e.preventDefault()}` sull'`<img>` + CSS `-webkit-touch-callout:
+   none` (necessario anche per iOS Safari, che a volte ignora il solo evento JS) e
+   `user-select: none`.
+2. **Trascinamento del dito intercettato come scroll della pagina**: `touch-action: none`
+   era impostato solo su `.griglia-trascinabile` (fase griglia), non sulla classe base
+   `.punti-riferimento-image` usata nella fase di tap dei punti — quindi un tap-e-trascina
+   per aggiustare un punto veniva letto dal browser come uno scroll/pan della pagina invece
+   che come il drag custom per la lente. Solo un tap fermo (senza movimento percepibile)
+   funzionava correttamente. Fix: `touch-action: none` spostato sulla classe base.
+
+Dopo questi due fix, Davide conferma che funziona "molto meglio" ma segnala un **ritardo
+visibile** nell'aggiornamento del contenuto/posizione della lente rispetto al dito. Causa
+probabile: entrambi gli `useEffect` di `Magnifier` (ridisegno canvas + riposizionamento)
+girano DOPO il paint del browser — ogni movimento del dito lasciava un frame in cui la
+lente mostrava ancora il contenuto/posizione PRECEDENTE prima di aggiornarsi. Fix: entrambi
+passati a **`useLayoutEffect`** (sincrono, prima del paint, stesso frame dell'evento
+pointer che l'ha causato) — pattern React standard per UI che deve seguire il puntatore
+senza un frame di ritardo percepibile.
+
+**Materiali ancora troppo riflettenti**: vista la foto reale composita, Davide ha chiesto
+di ridurre parecchio la riflettività (prima descritta come "va bene più metallico", ora
+"molto meno riflettente" — la roughness 0.15 del giro precedente dava uno sguardo da cromo/
+specchio con striature dure, non da alluminio verniciato). Alzata a **0.5**. Chiesto anche
+di "caricare un HDRI come background per influenzare l'illuminazione" — **l'HDRI era già
+attivo** (`3d/hdri/studio_small_08_1k.hdr`, caricato come World per ogni render colorato,
+sezione precedente) — l'ipotesi è che col materiale quasi a specchio di prima il suo
+effetto fosse mascherato da riflessi duri puntuali invece che leggibile come sfumatura
+morbida diffusa; con la roughness più alta ora si vede una transizione di luce graduale
+sulle gambe, plausibilmente già quello che Davide intendeva. Non ancora confermato da lui
+se questo risolve la richiesta o se intendeva davvero un HDRI diverso (es. uno esterno più
+ricco invece dello studio piccolo attuale).
+
 ## `pergolando-blender-service` — container isolato (Fase G)
 
 Blender **non** viene eseguito dentro `pergolando-backend`. È isolato in un proprio
@@ -737,12 +1221,22 @@ Trave_Posteriore, Aggancio_Parete. **Verificato**:
   definitivamente chiuso; il fixture di test usato (`abs_position_render.png` + `1.jpg`
   nello scratchpad) ha la sagoma isolata in mezzo al prato, non contro un muro reale — va
   rifatto con una foto/sagoma coerenti per un giudizio pulito anche sul resto della scena.
-- `Pilastrino_intermedio` e `Skipper` (da `flag4.fbx`) — ancora da spiegare/lavorare.
+- ~~`Pilastrino_intermedio` e `Skipper` (da `flag4.fbx`) — ancora da spiegare/lavorare.~~
+  **chiarito 2026-10-03**: nessuno dei due è legato al numero di guide (vedi sezione
+  "Multi-guida" sotto) — entrambi hanno il proprio bounding box X nello stesso angolo di
+  `Montante`/`Guida`/`Supporto` (x≈139-150, lo spigolo di riferimento), non al centro.
+  Quasi certamente geometria del prodotto "Skipper" (pag. 18-29 del listino originale,
+  esplicitamente NON incluso in questo bundle — vedi `note_estrazione` in
+  `catalog/database.json`) rimasta mescolata nell'FBX comune. Restano nascosti in scena
+  come prima; non più considerati un mistero aperto.
 - `Timpano`/`Trave_Laterale` non sono ancora parametrizzati per L/P/H arbitrari — esclusi da
   ogni render finché non vengono generalizzati (probabile candidato per la stessa
   architettura a perno, non ancora provato).
-- Materiali/colori reali (colore struttura, colore plastica) non sono ancora applicati nel
-  render — oggi è tutto un unico materiale grigio di debug (modalità "silhouette").
+- ~~Materiali/colori reali (colore struttura, colore plastica) non sono ancora applicati nel
+  render — oggi è tutto un unico materiale grigio di debug (modalità "silhouette").~~
+  **risolto 2026-10-03**, vedi sezione dedicata sopra.
+- ~~**Modello 3D non supporta configurazioni a 3 guide/3 pilastri**~~ **risolto 2026-10-03**,
+  vedi sezione "Multi-guida (2/3/4 guide)" sotto.
 - Verificare davvero il build Docker di `pergolando-blender-service` (mai testato in questo
   ambiente — però verificato con successo direttamente sul NAS, vedi sezione dedicata sopra).
 - Pipeline downstream (compositing ControlNet vero, passo 6b) — solo l'immagine di

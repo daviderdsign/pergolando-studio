@@ -1,0 +1,18 @@
+[
+  {
+    "direzione": "fronte",
+    "propostaCompleta": false
+  },
+  {
+    "direzione": "verticale",
+    "propostaCompleta": true,
+    "erroreAngolareSuiRiferimentiCorrettiGradi": [
+      3.8349361102171247e-16,
+      1.7940688143787337e-16
+    ]
+  },
+  {
+    "direzione": "profondità",
+    "propostaCompleta": false
+  }
+]

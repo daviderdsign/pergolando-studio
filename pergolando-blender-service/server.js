@@ -77,8 +77,10 @@ async function handleRender3d(req, res) {
     return;
   }
 
-  const flagBlendPath = join(THREED_ASSETS_PATH, 'flag.blend');
-  const scriptPath = join(THREED_ASSETS_PATH, 'generate_flag.py');
+  if (config.catalogo && !['arquati', 'pratic'].includes(config.catalogo)) { sendJson(res, 400, {error: 'invalid-catalog'}); return; }
+  const isBrera = config.catalogo === 'pratic';
+  const flagBlendPath = join(THREED_ASSETS_PATH, isBrera ? 'brera.blend' : 'flag.blend');
+  const scriptPath = join(THREED_ASSETS_PATH, isBrera ? 'generate_brera.py' : 'generate_flag.py');
   const tmpDir = await mkdtemp(join(tmpdir(), 'pergolando-render-'));
   const outputPath = join(tmpDir, `${randomUUID()}.png`);
 
@@ -87,6 +89,18 @@ async function handleRender3d(req, res) {
       BLENDER_EXECUTABLE_PATH,
       [
         '--background',
+        // Skips the user's own addons/preferences for this one headless
+        // invocation (factory defaults only) — without it, every single
+        // render in this session loaded two unrelated third-party addons:
+        // "bonsai" (a BIM/IFC addon, Python-version-incompatible with this
+        // Blender build, printing a RuntimeError on every launch) and
+        // BlenderKit (an asset-library addon that spawns its own separate
+        // client process on startup). Neither has any business in a
+        // scripted render service; found while diagnosing a real Blender
+        // crash ("bad allocation" loading OpenColorIO) that coincided with
+        // a leftover BlenderKit client process still running from an
+        // earlier failed render — see 3d/NOTES.md.
+        '--factory-startup',
         flagBlendPath,
         '--python',
         scriptPath,
@@ -96,7 +110,7 @@ async function handleRender3d(req, res) {
         '--output',
         outputPath,
       ],
-      { timeout: BLENDER_TIMEOUT_MS },
+      { timeout: config.technicalViews ? 180_000 : BLENDER_TIMEOUT_MS },
     );
   } catch (err) {
     console.error('Blender invocation failed:', err);
@@ -107,7 +121,11 @@ async function handleRender3d(req, res) {
 
   try {
     const buffer = await readFile(outputPath);
-    sendJson(res, 200, { imageBase64: buffer.toString('base64'), mimeType: 'image/png' });
+    let shadowBase64;
+    if (config.includeShadows && config.camera && !config.technicalViews) shadowBase64 = (await readFile(join(tmpDir, 'shadow.png'))).toString('base64');
+    let technicalDrawings;
+    if(config.technicalViews){technicalDrawings={...JSON.parse(await readFile(outputPath+'.technical.json','utf8'))};for(const view of ['plan','front','side'])technicalDrawings[view]=(await readFile(join(tmpDir,'technical-'+view+'.png'))).toString('base64');}
+    sendJson(res, 200, { ...(technicalDrawings && {technicalDrawings}), imageBase64: buffer.toString('base64'), mimeType: 'image/png', ...(shadowBase64 && {shadowBase64}) });
   } catch (err) {
     console.error('Blender produced no output file:', err);
     sendJson(res, 502, { error: 'render-failed' });
