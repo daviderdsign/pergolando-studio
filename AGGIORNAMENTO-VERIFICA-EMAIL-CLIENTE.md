@@ -33,3 +33,5 @@ L’email con codice parte soltanto quando il cliente preme il pulsante. Richied
 Il codice verifica l’accesso alla casella, non l’identità personale del nominativo dichiarato. Non viene introdotta una firma digitale. L’accesso di lettura alla pagina e al PDF continua a dipendere dal collegamento riservato: il codice è richiesto per la nuova accettazione, non per aprire la pagina.
 
 Non aggiunge pagamenti o ordini ai produttori. Collaudo sul NAS ancora rinviato: test locali con SMTP simulato, nessuna email reale inviata. Restano varianti dopo conferma e verifica dell’incasso al rivenditore prima degli ordini.
+
+20 ottobre: il codice non è più obbligatorio per default nell’accettazione delle offerte; vedere AGGIORNAMENTO-OFFERTA-TRATTATIVA-DISEGNI.md. La verifica degli account rimane separata.
