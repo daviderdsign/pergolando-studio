@@ -29,3 +29,5 @@ docker compose logs --since=5m --tail=80 backend
 ```
 
 Il lavoro locale non modifica la pratica attualmente aperta sul NAS. Dopo la distribuzione ricaricare l’app, aprire Prodotti o Offerta e controllare i disegni; poi proseguire dal punto 4. Nessun invio email o accettazione reale viene eseguito durante i test di questa modifica.
+
+Verifiche locali superate: build backend/frontend, lint e TypeScript; accettazione semplice, OTP, inviti/notifiche e persistenza media su database temporanei. Browser 320/390 px con servizi simulati: recupero/archivio viste, risposta persa, errore Blender e retry, separazione 3/4, accettazione/decisione/acconto. I dati geometrici mancanti non vengono inventati: viene richiesta la conferma della configurazione.
